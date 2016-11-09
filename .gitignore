@@ -27,3 +27,16 @@
 *.exe
 *.out
 *.app
+
+# Emacs
+*.*~
+
+# Ignore CMake generated files
+build/CMakeCache.txt
+build/CMakeFiles/
+build/Makefile
+build/cmake_install.cmake
+build/http
+build/kv
+build/mail
+build/storage
