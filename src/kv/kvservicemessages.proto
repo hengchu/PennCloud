@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+// ----------------------
+//     Request Types
+// ----------------------
+
+message PutRequest {
+  string row    = 1;
+  string column = 2;
+  bytes  value  = 3;
+};
+
+message GetRequest {
+  string row    = 1;
+  string column = 2;
+};
+
+// Compare the value currently stored in (r, c), if it's equal to
+// oldValue, then change it to newValue.
+message ComparePutRequest {
+  string row      = 1;
+  string column   = 2;
+  bytes  old_value = 3;
+  bytes  new_value = 4;
+};
+
+message DeleteRequest {
+  string row    = 1;
+  string column = 2;
+};
+
+message KVServiceRequest {
+  // This request id can be used by the client toline up responses
+  // and requests.
+  int32 request_id = 1;
+
+  // The actual request body.
+  oneof service_request {
+    PutRequest        put         = 2;
+    GetRequest        get         = 3;
+    ComparePutRequest compare_put = 4;
+    DeleteRequest     delete      = 5;
+  };
+};
+
+
+// ----------------------
+//     Response Types
+// ----------------------
+enum ResponseCode {
+  SUCCESS = 0; // The request was processed successfully.
+  FAILURE = 1; // The request failed.
+  INVALID = 2; // The request was invalid.
+};
+
+message GetResponse {
+  bytes value = 1;
+};
+
+message FailureResponse {
+  // An error message for any error that might have occured.
+  string error_message = 1;
+};
+
+message KVServiceResponse {
+  // The id of the corresponding request.
+  int32 request_id = 1;
+
+  // Code for the response.
+  ResponseCode response_code = 2;
+
+  oneof service_response {
+    GetResponse     get     = 3;
+    FailureResponse failure = 4;
+  };
+};
