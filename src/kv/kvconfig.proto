@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+message ServerConfig {
+  // The address of the server in textual format.
+  string address = 1;
+
+  // The port of the server.
+  int32  port    = 2;
+
+  // Whether this server is a master or not.
+  bool   master  = 3;
+}
+
+message KVConfiguration {
+  // A list of servers.
+  repeated ServerConfig servers = 1;
+}
