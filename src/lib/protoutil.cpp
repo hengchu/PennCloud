@@ -26,7 +26,7 @@ bool ProtoUtil::writeDelimitedTo(
   return true;
 }
 
-bool readDelimitedFrom(
+bool ProtoUtil::readDelimitedFrom(
     google::protobuf::io::ZeroCopyInputStream* rawInput,
     google::protobuf::Message*                 message) {
   // We create a new coded stream for each message.  Don't worry, this is fast,

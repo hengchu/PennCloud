@@ -1,14 +1,23 @@
 syntax = "proto3";
 
-message ServerConfig {
-  // The address of the server in textual format.
-  string address = 1;
+message Address {
+  // The IP address in textual format.
+  string ip_address = 1;
 
-  // The port of the server.
-  int32  port    = 2;
+  // The port number.
+  int32  port       = 2;
+}
+
+message ServerConfig {
+  // The address on which the server listens for other
+  // incoming server connection.
+  Address listen_addr = 1;
+
+  // The address on which the server listens for clients.
+  Address client_addr = 2;
 
   // Whether this server is a master or not.
-  bool   master  = 3;
+  bool master = 3;
 }
 
 message KVConfiguration {

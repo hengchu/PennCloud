@@ -75,12 +75,6 @@ int main(int argc, char *argv[])
 	      << LOG_END;
     _exit(1);
   }
-
-  int port = config.servers(params.d_serverId).port();
-
-  LOG_INFO << "Starting server with config = "
-	   << config.servers(params.d_serverId).DebugString()
-	   << LOG_END;
   
   KVApplication app(config, params.d_serverId);
   int rc = app.start();

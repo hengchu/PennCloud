@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+message KVServerNegotiation {
+  // Id of the server from which this
+  // negotiation message is sent.
+  int32 from_server_id = 1;
+}
