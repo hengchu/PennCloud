@@ -22,7 +22,7 @@ namespace {
 
     int rc = inet_pton(AF_INET,
 		       address.ip_address().c_str(),
-		       &addr.sin_addr.s_addr);
+		       &(addr.sin_addr));
 
     if (1 != rc) {
       LOG_ERROR << "Failed to parse IP address = "
@@ -204,7 +204,7 @@ void
 KVTCPCluster::sendHeartBeats()
 {
   KVServerMessage heartbeat;
-  heartbeat.mutable_heart_beat();
+  heartbeat.mutable_heart_beat()->set_payload("hello, world!");
   
   for (auto it = d_serverSessions.begin();
        it != d_serverSessions.end();
@@ -278,15 +278,13 @@ KVTCPCluster::thread()
 	   << " ready."
 	   << LOG_END;
 
-  while (d_running) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
+  while (d_running) {    
     LOG_INFO << "Checking aliveness of server sessions..."
 	     << LOG_END;
 
     // Ping peer servers.
     sendHeartBeats();
-    
+
     // Check for disconnected sessions here.
     std::set<int> deadSessionIds;
     
@@ -321,6 +319,8 @@ KVTCPCluster::thread()
 
     // Listen for any potential incoming connections.
     listenForServers();
+
+    // std::this_thread::yield();
   }
 }
 

@@ -9,6 +9,7 @@ message KVServerNegotiation {
 message KVHeartbeat {
   // A heartbeet message that is sent simply to
   // check if the peer is still alive.
+  string payload = 1;
 }
 
 message KVServerMessage {

@@ -6,8 +6,11 @@ SockUtil::sockAddrToString(const sockaddr_in& addr)
 {
   std::stringstream ss;
 
-  char buffer[18] = {0};
-  inet_ntop(AF_INET, &addr, buffer, sizeof(addr));
+  char buffer[INET_ADDRSTRLEN] = {0};
+  inet_ntop(AF_INET,
+	    &(addr.sin_addr),
+	    buffer,
+	    INET_ADDRSTRLEN);
 
   ss << std::string(buffer) << ':' << ntohs(addr.sin_port);
 

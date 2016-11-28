@@ -9,14 +9,14 @@ struct ProtoUtil {
   // protobuf messages.
 
   static
-  bool writeDelimitedTo(const google::protobuf::Message&            message,
+  bool writeDelimitedTo(const google::protobuf::MessageLite&        message,
 			google::protobuf::io::ZeroCopyOutputStream* rawOutput);
   // Write the given message to the output stream. Return true on
   // success, false otherwise.
 
   static
   bool readDelimitedFrom(google::protobuf::io::ZeroCopyInputStream* rawInput,
-			 google::protobuf::Message*                 message);
+			 google::protobuf::MessageLite*             message);
   // Read a message out of the given rawInput. Return true on success,
   // false otherwise.
   

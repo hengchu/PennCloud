@@ -34,7 +34,7 @@ KVApplication::KVApplication(const KVConfiguration& config,
   d_clientAddr.sin_port   = htons(port);
   int rc = inet_pton(AF_INET,
 		     d_config.servers(serverId).client_addr().ip_address().c_str(),
-		     &d_clientAddr.sin_addr.s_addr);
+		     &d_clientAddr.sin_addr);
 
   if (1 != rc) {
     LOG_ERROR << "Failed to parse client listen ip address"
