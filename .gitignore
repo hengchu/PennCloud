@@ -40,3 +40,4 @@ build/http
 build/kv
 build/mail
 build/storage
+build/*
