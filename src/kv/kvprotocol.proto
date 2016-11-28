@@ -5,3 +5,19 @@ message KVServerNegotiation {
   // negotiation message is sent.
   int32 from_server_id = 1;
 }
+
+message KVHeartbeat {
+  // A heartbeet message that is sent simply to
+  // check if the peer is still alive.
+}
+
+message KVServerMessage {
+  // The context id, it is used to identify
+  // request/response pairs.
+  int32 context_id = 1;
+
+  oneof server_message {
+    KVHeartbeat         heart_beat = 2;
+    KVServerNegotiation server_negotiation = 3;
+  }
+}

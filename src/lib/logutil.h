@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#include <thread>
 
 #define DECL_TIME				      \
   auto t = std::chrono::system_clock::now();	      \
@@ -14,7 +15,10 @@
   ss << std::put_time(std::gmtime(&now), "%c %Z") \
      << __FILE__				  \
      << ":"					  \
-     << __LINE__
+     << __LINE__				  \
+     << "["					  \
+     << std::this_thread::get_id()		  \
+     << "]"
 
 #define LOG_DEBUG	   \
   {			   \

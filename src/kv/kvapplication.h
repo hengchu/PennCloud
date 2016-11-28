@@ -6,7 +6,10 @@
 #include <atomic>
 #include <kvconfig.pb.h>
 #include <map>
-#include <kvserversession.h>
+
+#ifndef INCLUDED_KVTCPCLUSTER
+#include <kvtcpcluster.h>
+#endif
 
 class KVApplication {
   // This class defines the main mechanism that is the application
@@ -21,32 +24,15 @@ class KVApplication {
   int                              d_serverId;
   // The id of this server.
   
-  int                              d_socket;
-  // The socket that the application binds the server address to.
-
   int                              d_clientSocket;
   // The socket that the application binds the client listening
   // address to.
 
-  sockaddr_in                      d_serverAddr;
-  // The address to bind to the server socket.
-
   sockaddr_in                      d_clientAddr;
-  // The address to bind ot the client socket.
+  // The address to bind to the client socket.
+
+  KVTCPCluster                     d_cluster;
   
-  std::map<int, KVServerSession *> d_servers;
-  // A map from server id to server sessions. The sessions are owned
-  // and must be freed upon destruction.
-
-  void makeConnectionWithServer(int serverId);
-  // Make connection with the given server.
-  
-  void makeConnections();
-  // Make connections to other servers.
-
-  void listenForServers();
-  // Listen for incoming server connections.
-
   void listenForClients();
   // Listen for incoming client connections.
   
@@ -59,8 +45,9 @@ class KVApplication {
   // Destroy this application.
   
   int start();
-  // Start the application. Returns 0 on success, a non-zero error
-  // code on failure.
+  // Start the application. Return non-zero error code on
+  // failure. Does NOT return if application is successfully started.
+  // AKA the application runs on the calling thread.
 
   int stop();
   // Stop the application. Returns 0 on success, a non-zero error code
