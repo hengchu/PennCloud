@@ -12,6 +12,7 @@
 #include <thread>
 #include <map>
 #include <memory>
+#include <queue>
 
 class KVTCPCluster {
   // This class implements a mechanism that manages a set of
@@ -27,6 +28,11 @@ class KVTCPCluster {
 
  private:
   using ServerSessionSP = std::shared_ptr<KVServerSession>;
+
+  struct RequestContext {
+    int             d_peerId;
+    KVServerMessage d_request;
+  };
   
   KVConfiguration                  d_config;
   // The configuration of the cluster.
@@ -51,6 +57,20 @@ class KVTCPCluster {
   // the map can be a null pointer. In which case, it means that a
   // connection was attempted with that peer but failed.
 
+  std::queue<RequestContext>       d_outstandingRequests;
+  // Outstanding requests from peer servers.
+
+  std::mutex                       d_outstandingRequestsLock;
+  // Lock to protect the queue of outstanding requests.
+
+  std::condition_variable          d_hasWork;
+  // A condition variable that signals whether we have work to process.
+
+  // PRIVATE FUNCTIONS
+  std::set<int> reapDeadServers();
+  // Delete the server sessions that are dead, and return the set of
+  // peer ids that were removed.
+  
   void makeConnectionWithServer(int serverId);
   // Block until connect()'ed with the given server.
   
@@ -69,11 +89,18 @@ class KVTCPCluster {
   
   void thread();
   // The main thread loop.
+
+  void enqueueRequest(int                    peerId,
+		      const KVServerMessage& msg);
+  // Put the request into the queue of outstanding requests.
+  // Executed on KVServerSession thread.
   
  public:
   KVTCPCluster(const KVConfiguration& config,
 	       int                    serverId);
-  // Create a cluster.
+  // Create a cluster. The callback is passed onto the server
+  // sessions, and is used as the request handler for each of the
+  // server session created.
 
   KVTCPCluster(const KVTCPCluster& other) = delete;
   KVTCPCluster& operator=(const KVTCPCluster& rhs) = delete;

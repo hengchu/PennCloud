@@ -6,6 +6,7 @@
 #include <cassert>
 #include <kvprotocol.pb.h>
 #include <protoutil.h>
+#include <functional>
 
 namespace {
 
@@ -35,8 +36,32 @@ namespace {
   }
 }
 
-KVTCPCluster::KVTCPCluster(const KVConfiguration& config,
-			   int                    serverId)
+void
+KVTCPCluster::enqueueRequest(int                    peerId,
+			     const KVServerMessage& msg)
+// Executed on KVServerSession thread.
+{
+  RequestContext req;
+  req.d_peerId  = peerId;
+  req.d_request = msg;
+  
+  // LOCK
+  {
+    std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
+
+    d_outstandingRequests.push(req);
+
+    d_hasWork.notify_one();
+  }
+  // UNLOCK
+
+  LOG_INFO << "Enqueued a request: "
+	   << msg.DebugString()
+	   << LOG_END;
+}
+
+KVTCPCluster::KVTCPCluster(const KVConfiguration&           config,
+			   int                              serverId)
   : d_config(config)
   , d_serverId(serverId)
   , d_listenAddr()
@@ -118,7 +143,13 @@ KVTCPCluster::makeConnectionWithServer(int serverId)
     _exit(1);
   }
 
-  d_serverSessions[serverId] = std::make_shared<KVServerSession>(sock, serverId);
+  d_serverSessions[serverId] =
+    std::make_shared<KVServerSession>(sock,
+				      serverId,
+				      std::bind(&KVTCPCluster::enqueueRequest,
+						this,
+						std::placeholders::_1,
+						std::placeholders::_2));
 }
 
 void
@@ -196,13 +227,20 @@ KVTCPCluster::listenForServers()
 
     d_serverSessions[negotiation.from_server_id()] =
       std::make_shared<KVServerSession>(sock,
-		                       negotiation.from_server_id());
+					negotiation.from_server_id(),
+					std::bind(&KVTCPCluster::enqueueRequest,
+						  this,
+						  std::placeholders::_1,
+						  std::placeholders::_2));
   }
 }
 
 void
 KVTCPCluster::sendHeartBeats()
 {
+  LOG_INFO << "Sending heart beats to all peers"
+	   << LOG_END;
+  
   KVServerMessage heartbeat;
   heartbeat.mutable_heart_beat()->set_payload("hello, world!");
   
@@ -210,7 +248,7 @@ KVTCPCluster::sendHeartBeats()
        it != d_serverSessions.end();
        ++it) {
     if (it->second) {
-      it->second->send(heartbeat);
+      it->second->sendRequest(heartbeat);
     }
   }
 }
@@ -278,50 +316,66 @@ KVTCPCluster::thread()
 	   << " ready."
 	   << LOG_END;
 
-  while (d_running) {    
-    LOG_INFO << "Checking aliveness of server sessions..."
-	     << LOG_END;
+  while (d_running) {
+    // LOCK
+    {
+      std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
 
-    // Ping peer servers.
-    sendHeartBeats();
+      // Wait for up to 5 seconds
+      // LOCK is released upon wait.
+      d_hasWork.wait_for(uniqueLock, std::chrono::milliseconds(5000));
+      // LOCK is acquired here.
 
-    // Check for disconnected sessions here.
-    std::set<int> deadSessionIds;
-    
-    for (auto it = d_serverSessions.begin();
-	 it != d_serverSessions.end();
-	 ++it) {
-      if (!it->second || !it->second->alive()) {
-	LOG_WARN << "Detected dead server session = "
-		 << it->first
-		 << ", will attempt to re-establish connection."
-		 << LOG_END;
-	deadSessionIds.insert(it->first);
-
-	// Stop the sessions's thread loop.
-	if (it->second) {
-	  it->second->stop();
-	}
+      if (!d_outstandingRequests.empty()) {
+	RequestContext request = d_outstandingRequests.front();
+	d_outstandingRequests.pop();
+	// UNLOCK before we process the request.
+	uniqueLock.unlock();
+	// PROCESS THE REQUEST
+      } else {
+	// If the queue is empty.
+	uniqueLock.unlock();
+	sendHeartBeats();
       }
     }
+    // UNLOCK
 
-    for (auto it = deadSessionIds.begin();
-	 it != deadSessionIds.end();
-	 ++it) {      
-      // Free the server session object.
-      d_serverSessions.erase(*it);
-      
-      // Make the outgoing connection if this peer has a smaller id.
-      if (*it < d_serverId) {
-	makeConnectionWithServer(*it);
-      }
-    }
-
-    // Listen for any potential incoming connections.
-    listenForServers();
-
-    // std::this_thread::yield();
+    // Reap any potentially dead servers.
+    reapDeadServers();
   }
+}
+
+std::set<int>
+KVTCPCluster::reapDeadServers()
+{
+  // Check for disconnected sessions here.
+  std::set<int> deadSessionIds;
+  
+  for (auto it = d_serverSessions.begin();
+       it != d_serverSessions.end();
+       ++it) {
+    if (!it->second || !it->second->alive()) {
+      LOG_WARN << "Detected dead server session = "
+	       << it->first
+	       << ", will attempt to re-establish connection."
+	       << LOG_END;
+      deadSessionIds.insert(it->first);
+      
+      // Stop the sessions's thread loop.
+      if (it->second) {
+	it->second->stop();
+      }
+    }
+  }
+
+  for (auto it = deadSessionIds.begin();
+       it != deadSessionIds.end();
+       ++it) {      
+    // Free the server session object.
+    d_serverSessions.erase(*it);
+  }
+
+  return deadSessionIds;
 }
 
 int
@@ -356,8 +410,11 @@ KVTCPCluster::stop()
       return rc;
     }
   }
-  
+
   d_running = false;
+  
+  // Unlock if we're waiting on something.
+  d_hasWork.notify_one();
   d_thread.join();
 
   return 0;

@@ -73,17 +73,17 @@ KVApplication::listenForClients()
     _exit(1);
   }
 
-  while (d_running) {
-    rc = listen(d_clientSocket, k_BACKLOG_SIZE);
+  rc = listen(d_clientSocket, k_BACKLOG_SIZE);
+  
+  if (0 != rc) {
+    LOG_ERROR << "listen() failed with rc = " << rc
+	      << ", error = "
+	      << std::strerror(errno)
+	      << LOG_END;
+    _exit(1);
+  }
 
-    if (0 != rc) {
-      LOG_WARN << "listen() failed with rc = " << rc
-	       << ", error = "
-	       << std::strerror(errno)
-	       << LOG_END;
-      continue;
-    }
-
+  while (d_running) {  
     sockaddr_in clientAddr;
     socklen_t   clientAddrSize = sizeof(clientAddr);
     int clientSock = accept(d_clientSocket,
@@ -101,6 +101,86 @@ KVApplication::listenForClients()
     LOG_INFO << "Established client connection from address = "
 	     << SockUtil::sockAddrToString(clientAddr)
 	     << LOG_END;
+
+    int clientId = d_clientId++;
+    ClientSessionSP clientSession = std::make_shared<KVClientSession>(
+					   clientId,
+					   clientSock,
+					   std::bind(&KVApplication::handleClientRequest,
+						     this,
+						     std::placeholders::_1,
+						     std::placeholders::_2));
+
+    // LOCK
+    {
+      std::lock_guard<std::mutex> guard(d_clientsLock);
+      
+      d_clients[clientId] = clientSession;
+    }
+    // UNLOCK
+
+    // Clean up any potential dead clients.
+    reapDeadClients();
+  }
+}
+
+void
+KVApplication::reapDeadClients()
+{
+  // LOCK
+  {
+    std::lock_guard<std::mutex> guard(d_clientsLock);
+
+    std::set<int> deadClients;
+    for (auto it = d_clients.begin(); it != d_clients.end(); ++it) {
+      if (!it->second->alive()) {
+	LOG_INFO << "Client = "
+		 << it->second->clientId()
+		 << " is dead. Marking it for removal."
+		 << LOG_END;
+	deadClients.insert(it->first);
+      }
+    }
+
+    for (auto it = deadClients.begin(); it != deadClients.end(); ++it) {
+      d_clients[*it]->stop();
+      d_clients.erase(*it);
+    }
+  }
+  // UNLOCK
+}
+
+void
+KVApplication::handleClientRequest(int                     clientId,
+				   const KVServiceRequest& request)
+{
+  ClientSessionSP clientSession;
+
+  // LOCK
+  {
+    std::lock_guard<std::mutex> guard(d_clientsLock);
+    
+    auto clientSessionIt = d_clients.find(clientId);
+
+    if (clientSessionIt != d_clients.end() &&
+	clientSessionIt->second->alive()) {
+      clientSession = clientSessionIt->second;
+    }
+  }
+  // UNLOCK
+
+  KVServiceResponse resp;
+  resp.set_request_id(request.request_id());
+  resp.set_response_code(ResponseCode::FAILURE);
+  resp.mutable_failure()->set_error_message("NOT IMPLEMENTED YET.");
+
+  int rc = clientSession->sendResponse(request.request_id(),
+				       resp);
+
+  if (0 != rc) {
+    LOG_ERROR << "Failed to send response back to client = "
+	      << clientId
+	      << LOG_END;
   }
 }
 

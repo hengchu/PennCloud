@@ -1,4 +1,5 @@
 syntax = "proto3";
+import "kvservicemessages.proto";
 
 message KVServerNegotiation {
   // Id of the server from which this
