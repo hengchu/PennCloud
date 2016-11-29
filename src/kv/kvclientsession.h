@@ -5,6 +5,7 @@
 #include <functional>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <thread>
+#include <atomic>
 
 class KVClientSession {
   // This class implements a mechanism that is the session between a
