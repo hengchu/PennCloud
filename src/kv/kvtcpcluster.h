@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <queue>
+#include <condition_variable>
 
 class KVTCPCluster {
   // This class implements a mechanism that manages a set of
