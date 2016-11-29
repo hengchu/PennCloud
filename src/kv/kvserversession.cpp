@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <kvprotocol.pb.h>
 #include <protoutil.h>
+#include <cstring>
 
 namespace {
   int setRequestBit(int contextId)
