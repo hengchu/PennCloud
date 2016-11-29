@@ -6,6 +6,7 @@
 #include <kvprotocol.pb.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <map>
+#include <mutex>
 
 class KVServerSession {
   // This class defines a mechanism for the server sessions.
