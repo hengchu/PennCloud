@@ -248,7 +248,12 @@ KVTCPCluster::sendHeartBeats()
        it != d_serverSessions.end();
        ++it) {
     if (it->second) {
-      it->second->sendRequest(heartbeat);
+      int rc = it->second->sendRequest(heartbeat);
+      if (rc != 0) {
+	LOG_WARN << "Failed to send heartbeat, rc = "
+		 << rc
+		 << LOG_END;
+      }
     }
   }
 }

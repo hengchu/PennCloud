@@ -5,6 +5,8 @@ find_package (Threads)
 
 # Set the C++ standard to 11 for all the goodies
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} "-pthread")
+set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-pthread")
 set(PROJECT_SRC ${CMAKE_SOURCE_DIR}/../src)
 set(BUILD_DIR   ${CMAKE_SOURCE_DIR})
 set(PROTOC_BIN  ${BUILD_DIR}/protobuf-build/bin/protoc)
