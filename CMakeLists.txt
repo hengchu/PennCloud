@@ -1,5 +1,7 @@
 cmake_minimum_required (VERSION 3.1.0 FATAL_ERROR)
-project (CIS505Final CXX)
+project (CIS505Final C CXX)
+
+find_package (Threads)
 
 # Set the C++ standard to 11 for all the goodies
 set(CMAKE_CXX_STANDARD 11)
@@ -74,10 +76,10 @@ add_executable(storage ${STORAGE_SRC})
 add_executable(mail    ${MAIL_SRC})
 
 # Link the executables with the infra library
-target_link_libraries(http    infra ${PROTOBUF} message)
-target_link_libraries(kv      infra ${PROTOBUF} message)
-target_link_libraries(storage infra ${PROTOBUF} message)
-target_link_libraries(mail    infra ${PROTOBUF} message)
+target_link_libraries(http    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(kv      infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(storage infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(mail    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 
 # Add dependency to protoc generated files
 add_dependencies(infra   PROTO_SRCS)
