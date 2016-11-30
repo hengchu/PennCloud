@@ -170,6 +170,19 @@ KVServerSession::sendRequest(const KVServerMessage& message,
   d_contextId += 1;
   msgToSend.set_context_id(setRequestBit(d_contextId));
   
+  // If an empty callback is specified (meaning we're not expecting a
+  // response), we don't need to bother inserting it into the
+  // outstanding request map.
+  if (cb) {
+    // LOCK
+    {
+      std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
+      
+      d_outstandingRequests[d_contextId] = cb;
+    }
+    // UNLOCK
+  }
+  
   bool success = ProtoUtil::writeDelimitedTo(msgToSend,
 					     &d_outputStream);
   
@@ -183,18 +196,7 @@ KVServerSession::sendRequest(const KVServerMessage& message,
     return -1;
   }
 
-  // If an empty callback is specified (meaning we're not expecting a
-  // response), we don't need to bother inserting it into the
-  // outstanding request map.
-  if (cb) {
-    // LOCK
-    {
-      std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
-      
-      d_outstandingRequests[d_contextId] = cb;
-    }
-    // UNLOCK
-  }
+  d_outputStream.Flush();
 
   return 0;
 }
@@ -224,6 +226,8 @@ KVServerSession::sendResponse(int                    contextId,
     d_alive = false;
     return -1;
   }
+
+  d_outputStream.Flush();
 
   return 0;
 }

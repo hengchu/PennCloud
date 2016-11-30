@@ -80,6 +80,8 @@ KVClientSession::sendResponse(int                      requestId,
     return -1;
   }
 
+  d_outputStream.Flush();
+  
   return 0;
 }
 

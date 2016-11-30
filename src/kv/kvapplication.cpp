@@ -119,6 +119,8 @@ KVApplication::listenForClients()
     }
     // UNLOCK
 
+    clientSession->start();
+    
     // Clean up any potential dead clients.
     reapDeadClients();
   }
@@ -154,6 +156,71 @@ void
 KVApplication::handleClientRequest(int                     clientId,
 				   const KVServiceRequest& request)
 {
+  KVServiceResponse resp;
+  resp.set_request_id(request.request_id());
+  
+  switch (request.service_request_case()) {
+  case KVServiceRequest::kPut: {
+    // Do put.
+    d_storage.put(request.put().column(),
+		  request.put().row(),
+		  request.put().value());
+
+    resp.set_response_code(ResponseCode::SUCCESS);
+  } break;
+  case KVServiceRequest::kGet: {
+    // Do get.
+    std::string value;
+    int rc = d_storage.get(&value,
+			   request.get().column(),
+			   request.get().row());
+
+    if (0 == rc) {
+      resp.set_response_code(ResponseCode::SUCCESS);
+      resp.mutable_get()->set_value(value);
+    } else {
+      resp.set_response_code(ResponseCode::FAILURE);
+      resp.mutable_failure()->set_error_message("No such row and column.");
+    }
+			   
+  } break;
+  case KVServiceRequest::kComparePut: {
+    // Do CNP.
+    int rc = d_storage.compareAndPut(request.compare_put().column(),
+				     request.compare_put().row(),
+				     request.compare_put().old_value(),
+				     request.compare_put().new_value());
+    if (0 == rc) {
+      resp.set_response_code(ResponseCode::SUCCESS);
+    } else if (-1 == rc) {
+      resp.set_response_code(ResponseCode::FAILURE);
+      resp.mutable_failure()->set_error_message("No such row and column.");
+    } else if (-2 == rc) {
+      resp.set_response_code(ResponseCode::SUCCESS);
+      resp.mutable_failure()->set_error_message("Stored value doesn't match old value.");
+    } else {
+      // Should be unreachable.
+      assert(false);
+    }
+  } break;
+  case KVServiceRequest::kDelete: {
+    // Do delete.
+    int rc = d_storage.deleteValue(request.delete_().column(),
+				   request.delete_().row());
+
+    if (0 == rc) {
+      resp.set_response_code(ResponseCode::SUCCESS);
+    } else {
+      resp.set_response_code(ResponseCode::FAILURE);
+      resp.mutable_failure()->set_error_message("No such row and column.");
+    }				   
+  } break;
+  default:
+    // Invalid request.
+    resp.set_response_code(ResponseCode::INVALID);
+    resp.mutable_failure()->set_error_message("Invalid request type.");
+  }
+  
   ClientSessionSP clientSession;
 
   // LOCK
@@ -168,11 +235,6 @@ KVApplication::handleClientRequest(int                     clientId,
     }
   }
   // UNLOCK
-
-  KVServiceResponse resp;
-  resp.set_request_id(request.request_id());
-  resp.set_response_code(ResponseCode::FAILURE);
-  resp.mutable_failure()->set_error_message("NOT IMPLEMENTED YET.");
 
   int rc = clientSession->sendResponse(request.request_id(),
 				       resp);
