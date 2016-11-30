@@ -69,6 +69,7 @@ KVTCPCluster::KVTCPCluster(const KVConfiguration&           config,
   , d_thread()
   , d_running(false)
   , d_serverSessions()
+  , d_timer()
 {
   d_listenAddr = sockaddrFromAddress(config.servers(d_serverId).listen_addr());
   
@@ -149,7 +150,8 @@ KVTCPCluster::makeConnectionWithServer(int serverId)
 				      std::bind(&KVTCPCluster::enqueueRequest,
 						this,
 						std::placeholders::_1,
-						std::placeholders::_2));
+						std::placeholders::_2),
+				      &d_timer);
 }
 
 void
@@ -231,7 +233,8 @@ KVTCPCluster::listenForServers()
 					std::bind(&KVTCPCluster::enqueueRequest,
 						  this,
 						  std::placeholders::_1,
-						  std::placeholders::_2));
+						  std::placeholders::_2),
+					&d_timer);
   }
 }
 
@@ -248,7 +251,14 @@ KVTCPCluster::sendHeartBeats()
        it != d_serverSessions.end();
        ++it) {
     if (it->second) {
-      int rc = it->second->sendRequest(heartbeat);
+      int rc = it->second->sendRequest(heartbeat,
+				       [](int peerId,
+					  int status,
+					  const KVServerMessage& req,
+					  const KVServerMessage& resp){
+					 LOG_INFO << status << LOG_END;
+				       },
+				       500);
       if (rc != 0) {
 	LOG_WARN << "Failed to send heartbeat, rc = "
 		 << rc

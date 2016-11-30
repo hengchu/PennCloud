@@ -7,15 +7,36 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <map>
 #include <mutex>
+#include <timereventscheduler.h>
+#include <cstdint>
 
 class KVServerSession {
   // This class defines a mechanism for the server sessions.
  public:
+  
+  enum RequestStatus {
+    SUCCESS  = 0,
+    TIMEDOUT = -1
+  };
+  
   using CallBack = std::function<void(int peerId, const KVServerMessage& msg)>;
+  using RequestCallBack =
+    std::function<void(int                    peerId,
+		       RequestStatus          status,
+		       const KVServerMessage& request,
+		       const KVServerMessage& response)>;
   
  private:
-  using FileInputStream = google::protobuf::io::FileInputStream;
+  using FileInputStream  = google::protobuf::io::FileInputStream;
   using FileOutputStream = google::protobuf::io::FileOutputStream;
+  using TimerHandle      = TimerEventScheduler::TimerHandle;
+
+  struct RequestContext {
+    KVServerMessage d_request;
+    RequestCallBack d_callback;
+    TimerHandle     d_timerHandle;
+    bool            d_hasTimeout;
+  };
   
   int                        d_socket;
   // The socket with which to communicate with this server.
@@ -42,7 +63,8 @@ class KVServerSession {
   FileOutputStream           d_outputStream;
   // Output stream over d_socket;
 
-  std::map<int, CallBack>    d_outstandingRequests;
+  std::map<int, RequestContext>
+                             d_outstandingRequests;
   // A map from context id to outstanding request callbacks.
 
   std::mutex                 d_outstandingRequestsLock;
@@ -50,14 +72,22 @@ class KVServerSession {
 
   CallBack                   d_serverRequestHandler;
   // The request handler used to handle peer server's requests.
+
+  TimerEventScheduler       *d_timerEventScheduler_p;
+  // The timer. Held, not owned.
+
+  void requestTimedOut(int contextId);
+  // Remove this request from the outstanding map.
+  // Note that it runs on the timer scheduler's thread.
   
   void threadLoop();
   // The main loop of the server session.
   
  public:  
-  KVServerSession(int             socket,
-		  int             peerId,
-		  const CallBack& callback);
+  KVServerSession(int                  socket,
+		  int                  peerId,
+		  const CallBack&      callback,
+		  TimerEventScheduler *timer);
   // Create a server session with given socket. The session now owns
   // this socket and is responsible for closing it.
   // It also takes a callback that is the request handler for handling
@@ -77,10 +107,18 @@ class KVServerSession {
   // Stop this session. Return 0 on success, non-zero code on failure.
 
   int sendRequest(const KVServerMessage& message,	   
-		  const CallBack&        callback = CallBack());
+		  const RequestCallBack& callback = RequestCallBack(),
+		  uint64_t               timeoutMilliseconds = 0);
   // Send the given message and invoke the optional callback when a
   // response is received. Note that the CallBack is invoked on the
-  // internal thread of the server session!
+  // internal thread of the server session or on the timer scheduler
+  // thread.
+
+  // Optionally, you can specify a timeout for the request in
+  // milliseconds when you supply a callback. If the response has not
+  // arrived in the specified amount of time, the callback will be
+  // invoked with a TIMEOUT status.
+  
   // Return 0 on success, non-zero code on send failure.
 
   int sendResponse(int                    contextId,

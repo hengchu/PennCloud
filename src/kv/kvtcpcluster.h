@@ -14,6 +14,7 @@
 #include <memory>
 #include <queue>
 #include <condition_variable>
+#include <timereventscheduler.h>
 
 class KVTCPCluster {
   // This class implements a mechanism that manages a set of
@@ -52,6 +53,8 @@ class KVTCPCluster {
 
   std::atomic_bool                 d_running;
   // Whether the cluster is running or not.
+
+  TimerEventScheduler              d_timer;
 
   std::map<int, ServerSessionSP>   d_serverSessions;
   // A map from server id to server sessions. Note that the value in

@@ -24,9 +24,10 @@ namespace {
 
 }
 
-KVServerSession::KVServerSession(int             socket,
-				 int             peerId,
-				 const CallBack& callback)
+KVServerSession::KVServerSession(int                  socket,
+				 int                  peerId,
+				 const CallBack&      callback,
+				 TimerEventScheduler *timer)
   : d_socket(socket)
   , d_peerId(peerId)
   , d_thread()
@@ -38,6 +39,7 @@ KVServerSession::KVServerSession(int             socket,
   , d_outstandingRequests()
   , d_outstandingRequestsLock()
   , d_serverRequestHandler(callback)
+  , d_timerEventScheduler_p(timer)
 {
   // NOTHING
 }
@@ -45,6 +47,35 @@ KVServerSession::KVServerSession(int             socket,
 KVServerSession::~KVServerSession()
 {
   close(d_socket);
+}
+
+void
+KVServerSession::requestTimedOut(int contextId)
+// Runs on the timer scheduler thread.
+{
+  LOG_INFO << "Request = "
+	   << contextId
+	   << " timed out, removing it from the context map."
+	   << LOG_END;
+
+  RequestCallBack cb;
+  KVServerMessage req;
+  
+  {
+    std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
+
+    auto it = d_outstandingRequests.find(contextId);
+    if (it != d_outstandingRequests.end()) {
+      cb  = it->second.d_callback;
+      req = it->second.d_request;
+      d_outstandingRequests.erase(it);
+    }
+  }
+
+  // Invoke the callback with a timed out status.
+  if (cb) {
+    cb(d_peerId, TIMEDOUT, req, KVServerMessage());
+  }
 }
 
 void
@@ -87,6 +118,10 @@ KVServerSession::threadLoop()
 	       << d_peerId
 	       << LOG_END;
 
+      // Find the callback in the outstanding map.
+      RequestCallBack cb;
+      KVServerMessage req;
+      
       // LOCK
       {
 	std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
@@ -99,14 +134,16 @@ KVServerSession::threadLoop()
 		   << ", but there is no corresponding outstanding request!"
 		   << LOG_END;
 	} else {
-	  const CallBack& cb = it->second;
-	  if (cb) {
-	    cb(d_peerId, serverMessage);
-	  }
+	  cb  = it->second.d_callback;
+	  req = it->second.d_request;
 	  d_outstandingRequests.erase(it);
 	}
       }
       // UNLOCK
+
+      if (cb) {
+	cb(d_peerId, SUCCESS, req, serverMessage);
+      }
     }
   }
 }
@@ -158,7 +195,8 @@ KVServerSession::alive()
 
 int
 KVServerSession::sendRequest(const KVServerMessage& message,
-			     const CallBack&        cb)
+			     const RequestCallBack& cb,
+			     uint64_t               timeoutMilliseconds)
 {
   if (!alive()) {
     return -1;
@@ -177,8 +215,23 @@ KVServerSession::sendRequest(const KVServerMessage& message,
     // LOCK
     {
       std::lock_guard<std::mutex> guard(d_outstandingRequestsLock);
+
+      RequestContext ctx;
+      ctx.d_callback   = cb;
+      ctx.d_request    = msgToSend;
+      ctx.d_hasTimeout = false;
+
+      if (timeoutMilliseconds > 0) {
+	ctx.d_hasTimeout = true;
+	ctx.d_timerHandle = d_timerEventScheduler_p->schedule(
+				timeoutMilliseconds,
+				0,
+				std::bind(&KVServerSession::requestTimedOut,
+					  this,
+					  int(d_contextId)));
+      }
       
-      d_outstandingRequests[d_contextId] = cb;
+      d_outstandingRequests[d_contextId] = ctx;
     }
     // UNLOCK
   }
