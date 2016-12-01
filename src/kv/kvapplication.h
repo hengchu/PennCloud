@@ -63,6 +63,9 @@ class KVApplication {
 
   std::mutex                       d_clientsLock;
   // The lock to protect the clients map.
+
+  std::vector<KVServiceRequest>    d_logs;
+  // The requests this server has processed.
   
   void listenForClients();
   // Listen for incoming client connections.

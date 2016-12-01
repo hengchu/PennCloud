@@ -7,10 +7,13 @@
 #include <kvprotocol.pb.h>
 #include <protoutil.h>
 #include <functional>
+#include <random>
 
 namespace {
 
   const int k_BACKLOG_SIZE = 10;
+
+  const int k_RPC_TIMEOUT  = 2000;
   
   sockaddr_in
   sockaddrFromAddress(const Address& address)
@@ -60,23 +63,53 @@ KVTCPCluster::enqueueRequest(int                    peerId,
 	   << LOG_END;
 }
 
-KVTCPCluster::KVTCPCluster(const KVConfiguration&           config,
-			   int                              serverId)
+KVTCPCluster::KVTCPCluster(const KVConfiguration& config,
+			   int                    serverId)
   : d_config(config)
   , d_serverId(serverId)
   , d_listenAddr()
   , d_socket(-1)
   , d_thread()
   , d_running(false)
-  , d_serverSessions()
   , d_timer()
+  , d_serverSessions()
+  , d_votesReceived(0)
+  , d_electionTimeout(0)
+  , d_leaderId(-1)
+  , d_currentTerm(0)
+  , d_votedFor(-1)
+  , d_commitIndex(-1)
+  , d_appliedIndex(-1)
+  , d_nextIndices()
+  , d_matchIndices()
 {
+  for (int i = 0; i < config.servers_size(); ++i) {
+    if (i == serverId) {
+      continue;
+    }
+    // TODO: next indices should be initialized to leader's last log
+    // index + 1.
+    d_nextIndices[i]  = 0;
+    d_matchIndices[i] = -1;
+  }
+  
   d_listenAddr = sockaddrFromAddress(config.servers(d_serverId).listen_addr());
   
   LOG_INFO << "Created KVTCPCluster for server = "
 	   << serverId
 	   << ", listen on = "
 	   << SockUtil::sockAddrToString(d_listenAddr)
+	   << LOG_END;
+
+  // Initialize the election timeout.
+  std::random_device randomDevice;
+  std::uniform_int_distribution<int> distribution(200, 500);
+  d_electionTimeout = distribution(randomDevice);
+
+  LOG_INFO << "Initialized election timeout = "
+	   << d_electionTimeout
+	   << " milliseconds on server = "
+	   << d_serverId
 	   << LOG_END;
 }
 
@@ -336,21 +369,55 @@ KVTCPCluster::thread()
     {
       std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
 
-      // Wait for up to 5 seconds
-      // LOCK is released upon wait.
-      d_hasWork.wait_for(uniqueLock, std::chrono::milliseconds(5000));
-      // LOCK is acquired here.
+      // TODO: implement stuff in the section of RULES FOR ALL
+      // SERVERS.
 
-      if (!d_outstandingRequests.empty()) {
-	RequestContext request = d_outstandingRequests.front();
-	d_outstandingRequests.pop();
-	// UNLOCK before we process the request.
-	uniqueLock.unlock();
-	// PROCESS THE REQUEST
+      if (d_leaderId != d_serverId &&
+	  d_votedFor != d_serverId) {
+	// We're a follower.
+	
+	// Wait for up to election timeout amount of milliseconds.
+	// LOCK is released upon wait.
+	auto releaseTime = std::chrono::steady_clock::now()
+	                     + std::chrono::milliseconds(d_electionTimeout);
+	
+	std::cv_status status = std::cv_status::no_timeout;
+	// To avoid spurious wakeup.
+	// Break out of the wait loop if we got a request, or we timed
+	// out.
+	while (d_outstandingRequests.empty() &&
+	       status != std::cv_status::timeout) {
+	  status = d_hasWork.wait_until(uniqueLock,
+					releaseTime);
+	}
+	// LOCK is acquired here.
+	
+	// Election time out triggered.
+	if (status == std::cv_status::timeout) {
+	  assert(d_outstandingRequests.empty());
+	  // TODO: We should convert to candidate and start an
+	  // election here.
+	  convertToCandidate();
+	} else {
+	  if (!d_outstandingRequests.empty()) {
+	    RequestContext request = d_outstandingRequests.front();
+	    d_outstandingRequests.pop();
+	    // PROCESS THE REQUEST
+	    processRequest(request.d_peerId,
+			   request.d_request);
+	  }
+	}
+      } else if (d_votedFor == d_serverId) {
+	// We're a candidate.
+	if (d_votesReceived > d_config.servers_size() / 2) {
+	  // TODO: We've received majority amount of votes. Convert to
+	  // leader.
+	} else {
+	  // Respond to request.
+	}
       } else {
-	// If the queue is empty.
-	uniqueLock.unlock();
-	sendHeartBeats();
+	// We're the leader.
+	assert(d_serverId == d_leaderId);
       }
     }
     // UNLOCK
@@ -433,4 +500,91 @@ KVTCPCluster::stop()
   d_thread.join();
 
   return 0;
+}
+
+void
+KVTCPCluster::incrementTerm()
+{
+  d_currentTerm += 1;
+  d_votesReceived = 0;
+}
+
+void
+KVTCPCluster::convertToCandidate()
+{
+  // Increment term and reset votes received.
+  incrementTerm();
+
+  // Vote for myself.
+  d_votesReceived += 1;
+  d_votedFor       = d_serverId;
+
+  // Send request votes.
+  KVServerMessage msg;
+  KVRequestVote& request = *(msg.mutable_request_vote());
+  request.set_term(d_currentTerm);
+  request.set_candidate_id(d_serverId);
+  request.set_last_log_index(-1);
+  request.set_last_log_term(-1);
+
+  for (auto it = d_serverSessions.begin();
+       it != d_serverSessions.end();
+       ++it) {
+    if (it->second) {
+      it->second->sendRequest(msg,
+			      /* Executed on kvserversession thread,
+				 or the timer scheduler's thread
+			      */			      
+			      [&](int                    peerId,
+				  RequestStatus          status,
+				  const KVServerMessage& req,
+				  const KVServerMessage& resp) {
+				if (status == KVServerSession::TIMEDOUT) {
+				  LOG_WARN << "Request for voting timed out."
+					   << LOG_END;
+				  return;
+				}
+
+				switch (resp.server_message_case()) {
+				case KVServerMessage::kResponse: {
+				  // We could have incremented the term while waiting
+				  // for the response.
+				  if (resp.response().success() &&
+				      resp.response().term() == d_currentTerm) {
+				    d_votesReceived += 1;
+				  } else if (resp.response().term() > d_currentTerm) {
+				    d_currentTerm = resp.response().term();
+				  }
+				} break;
+				default: {
+				  LOG_ERROR << "Unexpected response type = "
+					    << resp.server_message_case()
+					    << LOG_END;
+				} break;
+				}
+			      },
+			      k_RPC_TIMEOUT);
+    }
+  }
+}
+
+void
+KVTCPCluster::processRequest(int                    peerId,
+			     const KVServerMessage& request)
+{
+  switch(request.server_message_case()) {
+  case KVServerMessage::kAppendEntries: {
+    processAppendEntries(peerId, request.append_entries());
+  } break;
+  case KVServerMessage::kRequestVote: {
+    processRequestVote(peerId, request.request_vote());
+  } break;
+  default: {
+    LOG_ERROR << "Received unexpected request type = "
+	      << request.server_message_case()
+	      << " from peer = "
+	      << peerId
+	      << LOG_END;
+  } break;    
+  }
 }

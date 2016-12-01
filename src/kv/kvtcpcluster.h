@@ -30,6 +30,7 @@ class KVTCPCluster {
 
  private:
   using ServerSessionSP = std::shared_ptr<KVServerSession>;
+  using RequestStatus   = KVServerSession::RequestStatus;
 
   struct RequestContext {
     int             d_peerId;
@@ -70,6 +71,41 @@ class KVTCPCluster {
   std::condition_variable          d_hasWork;
   // A condition variable that signals whether we have work to process.
 
+  // -----------
+  // RAFT STATES
+
+  std::atomic_int                  d_votesReceived;
+  // The number of votes this server has received this round.
+  
+  int                              d_electionTimeout;
+  // Election timeout in number of milliseconds.
+
+  std::atomic_int                  d_leaderId;
+  // Current known leader's id. Could be -1 if no known leader exists.
+  
+  std::atomic_int                  d_currentTerm;
+  // Current term number.
+
+  std::atomic_int                  d_votedFor;
+  // Candidate id that I have voted for this round, or -1 if I haven't
+  // voted yet.
+
+  std::atomic_int                  d_commitIndex;
+  // Known highest index of committed logs.
+
+  std::atomic_int                  d_appliedIndex;
+  // Known highest index of applied logs.
+
+  std::map<int, int>               d_nextIndices;
+  // For each peer server, the index of the next log entry to send to
+  // that server.
+
+  std::map<int, int>               d_matchIndices;
+  // For each peer server, the highest index of known replicated logs.
+
+  // RAFT STATES
+  // -----------
+  
   // PRIVATE FUNCTIONS
   std::set<int> reapDeadServers();
   // Delete the server sessions that are dead, and return the set of
@@ -98,6 +134,25 @@ class KVTCPCluster {
 		      const KVServerMessage& msg);
   // Put the request into the queue of outstanding requests.
   // Executed on KVServerSession thread.
+
+  void incrementTerm();
+  // Increases current term by 1, also resets votes received this
+  // round to 0.
+  
+  void convertToCandidate();
+  // Vote for myself. Increment term. Send request vote.
+
+  void processRequest(int peerId,
+		      const KVServerMessage& request);
+  // Process the request.
+
+  void processAppendEntries(int peerId,
+			    const KVAppendEntries& request);
+  // Process an append entries request.
+  
+  void processRequestVote(int peerId,
+			  const KVRequestVote& request);
+  // Process a request vote request.
   
  public:
   KVTCPCluster(const KVConfiguration& config,

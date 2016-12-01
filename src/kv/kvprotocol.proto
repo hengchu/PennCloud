@@ -13,6 +13,67 @@ message KVHeartbeat {
   string payload = 1;
 }
 
+message KVAppendEntries {
+  // A message from RAFT leader to followers,
+  // asking them to append entries.
+
+  // Leader's term.
+  int32 term = 1;
+
+  // Leader's peer id, so followers
+  // can redirect requests.
+  int32 leader_id = 2;
+
+  // Index of log entry immediately
+  // preceeding new ones.
+  int32 prev_log_index = 3;
+
+  // Term of the log whose index is prevLogIndex.
+  int32 prev_log_term = 4;
+
+  // Leader's commit index.
+  int32 leader_commit = 5;
+
+  // The entries to append, may be empty so the
+  // message acts as a heartbeat.
+  repeated KVServiceRequest entries = 6;
+}
+
+message KVRequestVote {
+  // A message from RAFT candidate,
+  // requesting for a vote.
+
+  // Candidate's term.
+  int32 term = 1;
+
+  // Peer id of the candidate requesting to vote.
+  int32 candidate_id = 2;
+
+  // Candidate's last log entry's index.
+  int32 last_log_index = 3;
+
+  // Candidate's last log entry's term.
+  int32 last_log_term = 4;
+}
+
+message KVResponse {
+  // A response to either KVAppendEntries request
+  // or to KVRequestVote request.
+
+  // Current term of the responder.
+  int32 term = 1;
+
+  // For append entries, this is whether the entries were appended
+  // successfully or not.
+  // For vote requests, this is whether the vote was granted or not.
+  bool success = 2;
+}
+
+message KVForwardRequest {
+  // A message forwarding a client request.
+  KVServiceRequest forwarded_request = 1;
+}
+
 message KVServerMessage {
   // The context id, it is used to identify
   // request/response pairs.
@@ -20,6 +81,13 @@ message KVServerMessage {
 
   oneof server_message {
     KVHeartbeat         heart_beat = 2;
-    KVServerNegotiation server_negotiation = 3;
+
+    // RAFT messages.
+    KVAppendEntries     append_entries = 3;
+    KVRequestVote       request_vote = 4;
+    KVResponse          response = 5;
+
+    // Application messages.
+    KVForwardRequest    forward_request = 6;
   }
 }
