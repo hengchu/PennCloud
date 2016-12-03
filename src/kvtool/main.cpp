@@ -1,6 +1,7 @@
 #include <iostream>
 #include <kvapi.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 int main(int argc, char *argv[])
 {

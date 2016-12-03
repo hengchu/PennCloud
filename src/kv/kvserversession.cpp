@@ -84,9 +84,6 @@ KVServerSession::threadLoop()
   while (d_running && d_alive) {
     KVServerMessage serverMessage;
 
-    LOG_INFO << "Waiting for a server message..."
-	     << LOG_END;
-    
     bool success = ProtoUtil::readDelimitedFrom(&d_inputStream,
 						&serverMessage);
       
@@ -109,15 +106,8 @@ KVServerSession::threadLoop()
     int contextId = serverMessage.context_id();
 
     if (isRequestBitSet(contextId)) {
-      LOG_INFO << "Got a request from server = "
-	       << d_peerId
-	       << LOG_END;
       d_serverRequestHandler(d_peerId, serverMessage);
     } else {
-      LOG_INFO << "Got a response from server = "
-	       << d_peerId
-	       << LOG_END;
-
       // Find the callback in the outstanding map.
       RequestCallBack cb;
       KVServerMessage req;

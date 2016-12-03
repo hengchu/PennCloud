@@ -21,7 +21,11 @@
 #include <kvclientsession.h>
 #endif
 
-class KVApplication {
+#ifndef INCLUDED_KVLOGMANAGER
+#include <kvlogmanager.h>
+#endif
+
+class KVApplication : public KVLogManager {
   // This class defines the main mechanism that is the application
   // loop of kv storage service.
 
@@ -31,6 +35,11 @@ class KVApplication {
     KVServerMessage d_request;
   };
 
+  struct LogEntry {
+    int              d_term;
+    KVServiceRequest d_request;
+  };
+  
   using ClientSessionSP = std::shared_ptr<KVClientSession>;
 
   std::atomic_bool                 d_running;
@@ -64,8 +73,11 @@ class KVApplication {
   std::mutex                       d_clientsLock;
   // The lock to protect the clients map.
 
-  std::vector<KVServiceRequest>    d_logs;
+  std::vector<LogEntry>            d_logs;
   // The requests this server has processed.
+
+  std::mutex                       d_logsLock;
+  // A lock to protect the log entries.
   
   void listenForClients();
   // Listen for incoming client connections.
@@ -76,6 +88,11 @@ class KVApplication {
 
   void reapDeadClients();
   // Remove all the dead clients from the map.
+
+  void sendResponseToClient(int                      clientId,
+			    int                      requestId,
+			    const KVServiceResponse& resp);
+  // Send the response to the given client.
   
  public:
   KVApplication(const KVConfiguration& config,
@@ -93,6 +110,24 @@ class KVApplication {
   int stop();
   // Stop the application. Returns 0 on success, a non-zero error code
   // on failure.
+
+  int numberOfLogEntries();
+  // Return the number of log entries. Thread-safe.
+
+  int append(int                     term,
+	     const KVServiceRequest& request);
+  // Append a log entry, thread-safe.
+
+  void retrieve(int              *term,
+		KVServiceRequest *entry,
+		int               index);
+  // Retrieve the entry at the given index. Thread-safe.
+
+  void applyLog(int index);
+  // Apply the log at the given index.
+
+  void removeEntries(int index);
+  // Remove all the entries at and after the given index.
 };
 
 #endif

@@ -15,6 +15,7 @@
 #include <queue>
 #include <condition_variable>
 #include <timereventscheduler.h>
+#include <kvlogmanager.h>
 
 class KVTCPCluster {
   // This class implements a mechanism that manages a set of
@@ -29,8 +30,11 @@ class KVTCPCluster {
   // owns a thread.
 
  private:
-  using ServerSessionSP = std::shared_ptr<KVServerSession>;
-  using RequestStatus   = KVServerSession::RequestStatus;
+  using ServerSessionSP           = std::shared_ptr<KVServerSession>;
+  using RequestStatus             = KVServerSession::RequestStatus;
+  using ApplyNotificationCallBack = std::function<void()>;
+  using ApplyNotificationMap      =
+    std::map<int, std::vector<ApplyNotificationCallBack>>;
 
   struct RequestContext {
     int             d_peerId;
@@ -43,6 +47,9 @@ class KVTCPCluster {
   int                              d_serverId;
   // Server id of this node on the cluster.
 
+  KVLogManager                    *d_logManager_p;
+  // Log manager, held, not owned.
+  
   sockaddr_in                      d_listenAddr;
   // The address to listen on.
   
@@ -71,9 +78,18 @@ class KVTCPCluster {
   std::condition_variable          d_hasWork;
   // A condition variable that signals whether we have work to process.
 
+  ApplyNotificationMap             d_applyNotifications;
+  // A map from log index to apply notifications callbacks.
+
+  std::mutex                       d_applyNotificationsLock;
+  // Lock to protect apply notifications.
+  
   // -----------
   // RAFT STATES
 
+  std::mutex                       d_raftLock;
+  // Lock to protect the raft states.
+  
   std::atomic_int                  d_votesReceived;
   // The number of votes this server has received this round.
   
@@ -142,21 +158,62 @@ class KVTCPCluster {
   void convertToCandidate();
   // Vote for myself. Increment term. Send request vote.
 
-  void processRequest(int peerId,
+  void convertToFollower(int term);
+  // Convert myself to a follower while setting d_currentTerm = term.
+
+  void convertToLeader();
+  // Convert myself to leader and start sending out append entries
+  // requests.
+
+  void setRaftIndicesForPeer(int peerId,
+			     int nextIndex,
+			     int matchIndex);
+  // Set the next and match indices for the given peer.
+
+  bool shouldIncrementCommitIndex();
+  // Check if we should increment the commit index.
+  
+  void processRequest(int                    peerId,
 		      const KVServerMessage& request);
   // Process the request.
 
-  void processAppendEntries(int peerId,
+  void processAppendEntries(int                    peerId,
+			    int                    contextId,
 			    const KVAppendEntries& request);
   // Process an append entries request.
   
-  void processRequestVote(int peerId,
+  void processRequestVote(int                  peerId,
+			  int                  contextId,
 			  const KVRequestVote& request);
   // Process a request vote request.
+
+  void sendAppendEntries();
+
+  void sendAppendEntriesToPeer(int peerId);
+  // Send append entries request to the given peer.
+  
+  void logRaftStates();
+  // Dump the raft states.
+
+  std::unique_lock<std::mutex>&&
+    waitAndProcessRaftEventFollower(std::unique_lock<std::mutex>&& lock,
+				    int                            waitTime);
+  // One iteration of the raft event loop for a follower.
+
+  std::unique_lock<std::mutex>&&
+    waitAndProcessRaftEventCandidate(std::unique_lock<std::mutex>&& lock,
+				     int                            waitTime);
+  // One iteration of the raft event loop for a candidate.
+  
+  std::unique_lock<std::mutex>&&
+    waitAndProcessRaftEventLeader(std::unique_lock<std::mutex>&& lock,
+				  int                            waitTime);
+  // One iteration of the raft event loop for a leader.
   
  public:
-  KVTCPCluster(const KVConfiguration& config,
-	       int                    serverId);
+  KVTCPCluster(const KVConfiguration&  config,
+	       int                     serverId,
+	       KVLogManager           *logManager);
   // Create a cluster. The callback is passed onto the server
   // sessions, and is used as the request handler for each of the
   // server session created.
@@ -176,7 +233,20 @@ class KVTCPCluster {
   int stop();
   // Stop the cluster. Return 0 on success, non-zero error code on
   // failure.
-  
+
+  bool isLeader();
+  // Returns true if we're currently the leader.
+
+  void notifyWhenApplied(int                          index,
+			 const std::function<void()>& cb);
+  // Run the callback when log with the given index is commited.
+
+  int currentTerm();
+  // Return the current term.
+
+  void leaderClientAddress(std::string *ipAddr,
+			   int         *port);
+  // Return the clinet address of the leader.
 };
 
 #endif

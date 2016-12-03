@@ -69,11 +69,6 @@ message KVResponse {
   bool success = 2;
 }
 
-message KVForwardRequest {
-  // A message forwarding a client request.
-  KVServiceRequest forwarded_request = 1;
-}
-
 message KVServerMessage {
   // The context id, it is used to identify
   // request/response pairs.
@@ -86,8 +81,5 @@ message KVServerMessage {
     KVAppendEntries     append_entries = 3;
     KVRequestVote       request_vote = 4;
     KVResponse          response = 5;
-
-    // Application messages.
-    KVForwardRequest    forward_request = 6;
   }
 }

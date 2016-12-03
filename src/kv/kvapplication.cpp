@@ -9,6 +9,8 @@
 #include <kvprotocol.pb.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <cassert>
+#include <semaphore.h>
+#include <kvapi.h>
 
 namespace {
   const int k_BACKLOG_SIZE = 10;
@@ -21,7 +23,7 @@ KVApplication::KVApplication(const KVConfiguration& config,
   , d_serverId(serverId)
   , d_clientSocket(-1)
   , d_clientAddr()
-  , d_cluster(config, serverId)
+  , d_cluster(config, serverId, this)
 {
   int port = d_config.servers(serverId).client_addr().port();
 
@@ -155,94 +157,103 @@ KVApplication::reapDeadClients()
 void
 KVApplication::handleClientRequest(int                     clientId,
 				   const KVServiceRequest& request)
+// Executed on client session thread.
 {
-  KVServiceResponse resp;
-  resp.set_request_id(request.request_id());
-  
   switch (request.service_request_case()) {
-  case KVServiceRequest::kPut: {
-    // Do put.
-    d_storage.put(request.put().column(),
-		  request.put().row(),
-		  request.put().value());
-
-    resp.set_response_code(ResponseCode::SUCCESS);
-  } break;
-  case KVServiceRequest::kGet: {
-    // Do get.
-    std::string value;
-    int rc = d_storage.get(&value,
-			   request.get().column(),
-			   request.get().row());
-
-    if (0 == rc) {
-      resp.set_response_code(ResponseCode::SUCCESS);
-      resp.mutable_get()->set_value(value);
-    } else {
-      resp.set_response_code(ResponseCode::FAILURE);
-      resp.mutable_failure()->set_error_message("No such row and column.");
-    }
-			   
-  } break;
+  case KVServiceRequest::kGet:
+  case KVServiceRequest::kPut:
+  case KVServiceRequest::kDelete:
   case KVServiceRequest::kComparePut: {
-    // Do CNP.
-    int rc = d_storage.compareAndPut(request.compare_put().column(),
-				     request.compare_put().row(),
-				     request.compare_put().old_value(),
-				     request.compare_put().new_value());
-    if (0 == rc) {
+    // OK
+    if (d_cluster.isLeader()) {
+      int currTerm = d_cluster.currentTerm();
+      int logIndex = append(currTerm, request);
+
+      Semaphore appliedSemaphore(0);
+      
+      d_cluster.notifyWhenApplied(logIndex,
+				  [&]() {
+				    appliedSemaphore.post();
+				  });
+
+      LOG_INFO << "Waiting for client = " << clientId
+	       << "'s request to be applied."
+	       << LOG_END;
+      
+      appliedSemaphore.wait();
+
+      LOG_INFO << "Log index = "
+	       << logIndex
+	       << " is applied!."
+	       << LOG_END;
+
+      KVServiceResponse resp;
       resp.set_response_code(ResponseCode::SUCCESS);
-    } else if (-1 == rc) {
-      resp.set_response_code(ResponseCode::FAILURE);
-      resp.mutable_failure()->set_error_message("No such row and column.");
-    } else if (-2 == rc) {
-      resp.set_response_code(ResponseCode::SUCCESS);
-      resp.mutable_failure()->set_error_message("Stored value doesn't match old value.");
+      if (request.service_request_case() == KVServiceRequest::kGet) {
+	std::string value;
+	int rc = d_storage.get(&value,
+			       request.get().column(),
+			       request.get().row());
+
+	if (0 != rc) {
+	  resp.set_response_code(ResponseCode::FAILURE);
+	  resp.mutable_failure()->set_error_message("No value such column and row.");
+	} else {
+	  resp.mutable_get()->set_value(value);
+	}
+      }
+
+      sendResponseToClient(clientId,
+			   request.request_id(),
+			   resp);
     } else {
-      // Should be unreachable.
-      assert(false);
+      // Create a client session to the leader and forward the request.
+      std::string leaderIP;
+      int         leaderPort;
+      d_cluster.leaderClientAddress(&leaderIP,
+				    &leaderPort);
+
+      KVServiceResponse resp;
+
+      KVSession session(leaderIP, leaderPort);
+
+      int rc = session.connect();
+      if (0 != rc) {
+	resp.set_response_code(ResponseCode::FAILURE);
+	resp.mutable_failure()->set_error_message("Could not forward request to leader");
+	sendResponseToClient(clientId,
+			     request.request_id(),
+			     resp);
+	return;
+      }
+
+      rc = session.request(&resp,
+			   request);
+      if (0 != rc) {
+	resp.set_response_code(ResponseCode::FAILURE);
+	resp.mutable_failure()->set_error_message("Failed to request leader.");
+	sendResponseToClient(clientId,
+			     request.request_id(),
+			     resp);
+	return;
+      }
+
+      session.disconnect();
+      sendResponseToClient(clientId,
+			   request.request_id(),
+			   resp);      
     }
   } break;
-  case KVServiceRequest::kDelete: {
-    // Do delete.
-    int rc = d_storage.deleteValue(request.delete_().column(),
-				   request.delete_().row());
-
-    if (0 == rc) {
-      resp.set_response_code(ResponseCode::SUCCESS);
-    } else {
-      resp.set_response_code(ResponseCode::FAILURE);
-      resp.mutable_failure()->set_error_message("No such row and column.");
-    }				   
-  } break;
-  default:
-    // Invalid request.
+  default: {
+    // NOT OK.
+    KVServiceResponse resp;
     resp.set_response_code(ResponseCode::INVALID);
     resp.mutable_failure()->set_error_message("Invalid request type.");
+
+    sendResponseToClient(clientId,
+			 request.request_id(),
+			 resp);
   }
-  
-  ClientSessionSP clientSession;
-
-  // LOCK
-  {
-    std::lock_guard<std::mutex> guard(d_clientsLock);
-    
-    auto clientSessionIt = d_clients.find(clientId);
-
-    if (clientSessionIt != d_clients.end() &&
-	clientSessionIt->second->alive()) {
-      clientSession = clientSessionIt->second;
-    }
-  }
-  // UNLOCK
-
-  int rc = clientSession->sendResponse(request.request_id(),
-				       resp);
-
-  if (0 != rc) {
-    LOG_ERROR << "Failed to send response back to client = "
-	      << clientId
-	      << LOG_END;
   }
 }
 
@@ -280,4 +291,127 @@ KVApplication::stop()
   d_running = false;
 
   return 0;
+}
+
+int
+KVApplication::numberOfLogEntries()
+{
+  // LOCK
+  std::lock_guard<std::mutex> guard(d_logsLock);
+
+  return d_logs.size();
+  // UNLOCK
+}
+
+int
+KVApplication::append(int                     term,
+		      const KVServiceRequest& request)
+{
+  // LOCK
+  std::lock_guard<std::mutex> guard(d_logsLock);
+
+  LogEntry entry;
+  entry.d_term    = term;
+  entry.d_request = request;
+
+  d_logs.push_back(entry);
+
+  return d_logs.size() - 1;
+  // UNLOCK
+}
+
+void
+KVApplication::retrieve(int              *term,
+			KVServiceRequest *entry,
+			int               index)
+{
+  // LOCK
+  std::lock_guard<std::mutex> guard(d_logsLock);
+
+  const LogEntry& log = d_logs[index];
+
+  *term  = log.d_term;
+  *entry = log.d_request;
+  // UNLOCK
+}
+
+void
+KVApplication::applyLog(int index)
+{
+  LogEntry log;
+  
+  // LOCK
+  {
+    std::lock_guard<std::mutex> guard(d_logsLock);
+    log = d_logs[index];
+  }
+  // UNLOCK
+
+  const KVServiceRequest& request = log.d_request;
+  
+  switch(request.service_request_case()) {
+  case KVServiceRequest::kPut: {
+    // Do put.
+    d_storage.put(request.put().column(),
+		  request.put().row(),
+		  request.put().value());
+  } break;
+  case KVServiceRequest::kGet: {
+    // Don't actually need to do anything.
+  } break;
+  case KVServiceRequest::kComparePut: {
+    // Do CNP.
+    d_storage.compareAndPut(request.compare_put().column(),
+			    request.compare_put().row(),
+			    request.compare_put().old_value(),
+			    request.compare_put().new_value());
+  } break;
+  case KVServiceRequest::kDelete: {
+    // Do delete.
+    d_storage.deleteValue(request.delete_().column(),
+			  request.delete_().row());
+  } break;
+  default:
+    // Invalid request.
+    LOG_ERROR << "Invalid log entry = "
+	      << request.DebugString()
+	      << LOG_END;
+  }
+}
+
+void
+KVApplication::removeEntries(int index)
+{
+  assert(index >= 0);
+  
+  // LOCK
+  std::lock_guard<std::mutex> guard(d_logsLock);
+
+  d_logs.resize(index);
+  // UNLOCK
+}
+
+void
+KVApplication::sendResponseToClient(int                      clientId,
+				    int                      requestId,
+				    const KVServiceResponse& resp)
+{
+  {
+    // LOCK
+    std::lock_guard<std::mutex> guard(d_clientsLock);
+
+    auto it = d_clients.find(clientId);
+
+    if (it == d_clients.end()) {
+      return;
+    }
+
+    ClientSessionSP& clientSession = it->second;
+      
+    if (clientSession->alive()) {
+      clientSession->sendResponse(requestId,
+				  resp);
+    }
+    // UNLOCK
+  }
 }
