@@ -815,6 +815,21 @@ KVTCPCluster::logRaftStates()
 	    << " ]"
 	    << LOG_END;
 
+  for (int i = 0;
+       i < d_logManager_p->numberOfLogEntries();
+       ++i) {
+    int term;
+    KVServiceRequest request;
+    d_logManager_p->retrieve(&term,
+			     &request,
+			     i);
+
+    LOG_ERROR << "Log[" << i << "]"
+	      << " = "
+	      << request.DebugString()
+	      << LOG_END;
+  }
+
   // Log the next and match indices
   if (d_leaderId == d_serverId) {
     std::stringstream ss;
@@ -1025,6 +1040,8 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
   request.set_leader_commit(d_commitIndex);
   request.set_prev_log_index(peerNextIndex - 1);
   request.set_prev_log_term(-1);
+
+  assert(request.leader_commit() == d_commitIndex);
 
   LOG_ERROR << "Peer next index = "
 	    << peerNextIndex
