@@ -1204,7 +1204,7 @@ KVTCPCluster::shouldIncrementCommitIndex()
   // LOCK
   std::lock_guard<std::mutex> guard(d_raftLock);
   
-  int matchSize = 0;
+  int matchSize = 1;
   
   for (auto it = d_matchIndices.begin();
        it != d_matchIndices.end();
