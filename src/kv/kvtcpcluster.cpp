@@ -552,8 +552,19 @@ KVTCPCluster::convertToCandidate()
   KVRequestVote& request = *(msg.mutable_request_vote());
   request.set_term(d_currentTerm);
   request.set_candidate_id(d_serverId);
-  request.set_last_log_index(-1);
   request.set_last_log_term(-1);
+
+  int lastLogIndex = d_logManager_p->numberOfLogEntries() - 1;
+  request.set_last_log_index(lastLogIndex);
+
+  if (lastLogIndex >= 0) {
+    int              lastLogTerm;
+    KVServiceRequest lastLog;
+    d_logManager_p->retrieve(&lastLogTerm,
+			     &lastLog,
+			     lastLogIndex);
+    request.set_last_log_term(lastLogTerm);
+  }
 
   for (auto it = d_serverSessions.begin();
        it != d_serverSessions.end();
@@ -815,6 +826,8 @@ KVTCPCluster::logRaftStates()
 	    << ", leaderId = " << d_leaderId
 	    << ", currentTerm = " << d_currentTerm
 	    << ", votedFor = " << d_votedFor
+	    << ", commitIndex = " << d_commitIndex
+	    << ", appliedIndex = " << d_appliedIndex
 	    << " ]"
 	    << LOG_END;
 
@@ -1193,23 +1206,21 @@ KVTCPCluster::shouldIncrementCommitIndex()
   // LOCK
   std::lock_guard<std::mutex> guard(d_raftLock);
   
-  int matchSize = 0;
+  // +1 because count myself in.
+  int matchSize = 1;
   
   for (auto it = d_matchIndices.begin();
        it != d_matchIndices.end();
        ++it) {    
     if (it->second > d_commitIndex) {
-      LOG_INFO << "Peer["
-	       << it->first
-	       << "] has match = "
-	       << it->second
-	       << ", while commitIndex = "
-	       << d_commitIndex
-	       << LOG_END;
       matchSize += 1;
     }
   }
 
+  LOG_ERROR << "Match size = "
+	    << matchSize
+	    << LOG_END;
+  
   return matchSize > (d_config.servers_size() / 2);
   // UNLOCK
 }
