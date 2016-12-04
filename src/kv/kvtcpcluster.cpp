@@ -1039,7 +1039,8 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
     d_logManager_p->retrieve(&entryTerm,
 			     &entry,
 			     peerNextIndex);
-    *(request.add_entries()) = entry;
+    *(request.mutable_entries())->Add() = entry;
+    assert(request.mutable_entries()->size() == 1);
 
     if (peerNextIndex - 1 >= 0) {
       int              prevTerm;
