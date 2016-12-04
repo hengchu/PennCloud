@@ -561,11 +561,11 @@ KVTCPCluster::convertToCandidate()
     int              lastLogTerm;
     KVServiceRequest lastLog;
     d_logManager_p->retrieve(&lastLogTerm,
-			     &lastLog,
-			     lastLogIndex);
+                            &lastLog,
+                            lastLogIndex);
     request.set_last_log_term(lastLogTerm);
   }
-
+  
   for (auto it = d_serverSessions.begin();
        it != d_serverSessions.end();
        ++it) {
@@ -826,8 +826,6 @@ KVTCPCluster::logRaftStates()
 	    << ", leaderId = " << d_leaderId
 	    << ", currentTerm = " << d_currentTerm
 	    << ", votedFor = " << d_votedFor
-	    << ", commitIndex = " << d_commitIndex
-	    << ", appliedIndex = " << d_appliedIndex
 	    << " ]"
 	    << LOG_END;
 
@@ -843,6 +841,8 @@ KVTCPCluster::logRaftStates()
     LOG_ERROR << "Log[" << i << "]"
 	      << " = "
 	      << request.DebugString()
+	      << ", term = "
+	      << term
 	      << LOG_END;
   }
 
@@ -916,7 +916,6 @@ KVTCPCluster::waitAndProcessRaftEventFollower(int waitTime)
   
   // Election time out triggered.
   if (status == std::cv_status::timeout) {
-    assert(d_outstandingRequests.empty());
     // TODO: We should convert to candidate and start an
     // election here.
     convertToCandidate();
@@ -967,7 +966,6 @@ KVTCPCluster::waitAndProcessRaftEventCandidate(int waitTime)
   
   // Election time out triggered.
   if (status == std::cv_status::timeout) {
-    assert(d_outstandingRequests.empty());
     // TODO: We should convert to candidate and start an
     // election here.
     convertToCandidate();
@@ -1005,7 +1003,6 @@ KVTCPCluster::waitAndProcessRaftEventLeader(int waitTime)
   
   // Election time out triggered.
   if (status == std::cv_status::timeout) {
-    assert(d_outstandingRequests.empty());
     sendAppendEntries();
   } else {
     if (!d_outstandingRequests.empty()) {
@@ -1074,25 +1071,25 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
 			     peerNextIndex);
     *(request.mutable_entries())->Add() = entry;
     assert(request.mutable_entries()->size() == 1);
-
-    if (peerNextIndex - 1 >= 0) {
-      int              prevTerm;
-      KVServiceRequest prevEntry;
-      d_logManager_p->retrieve(&prevTerm,
-			       &prevEntry,
-			       peerNextIndex - 1);
-      request.set_prev_log_term(prevTerm);
-
-      auto msgDump = msg.DebugString();
-      LOG_INFO << "Sending appendEntries() = "
-	       << msgDump
-	       << ", to peer = "
-	       << peerId
-	       << LOG_END;
-      assert(request.prev_log_term() != -1);
-    }
   }
-
+    
+  if (peerNextIndex - 1 >= 0) {
+    assert (peerNextIndex - 1 < d_logManager_p->numberOfLogEntries());
+    int              prevTerm;
+    KVServiceRequest prevEntry;
+    d_logManager_p->retrieve(&prevTerm,
+			     &prevEntry,
+			     peerNextIndex - 1);
+    request.set_prev_log_term(prevTerm);
+    
+    auto msgDump = msg.DebugString();
+    LOG_INFO << "Sending appendEntries() = "
+	     << msgDump
+	     << ", to peer = "
+	     << peerId
+	     << LOG_END;
+    assert(request.prev_log_term() != -1);
+  }
   
   ServerSessionSP session = d_serverSessions[peerId];
 
@@ -1194,7 +1191,8 @@ KVTCPCluster::setRaftIndicesForPeer(int peerId,
   // LOCK
   std::lock_guard<std::mutex> guard(d_raftLock);
 
-  d_nextIndices[peerId]  = nextIndex;
+  d_nextIndices[peerId]  = std::min(nextIndex,
+				    d_logManager_p->numberOfLogEntries());
   d_matchIndices[peerId] = matchIndex;
   
   // UNLOCK
@@ -1206,21 +1204,23 @@ KVTCPCluster::shouldIncrementCommitIndex()
   // LOCK
   std::lock_guard<std::mutex> guard(d_raftLock);
   
-  // +1 because count myself in.
-  int matchSize = 1;
+  int matchSize = 0;
   
   for (auto it = d_matchIndices.begin();
        it != d_matchIndices.end();
        ++it) {    
     if (it->second > d_commitIndex) {
+      LOG_INFO << "Peer["
+	       << it->first
+	       << "] has match = "
+	       << it->second
+	       << ", while commitIndex = "
+	       << d_commitIndex
+	       << LOG_END;
       matchSize += 1;
     }
   }
 
-  LOG_ERROR << "Match size = "
-	    << matchSize
-	    << LOG_END;
-  
   return matchSize > (d_config.servers_size() / 2);
   // UNLOCK
 }
