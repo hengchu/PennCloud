@@ -63,6 +63,13 @@ KVApplication::listenForClients()
     _exit(1);
   }
 
+  int enableReuse = 1;
+  setsockopt(d_clientSocket,
+	     SOL_SOCKET,
+	     SO_REUSEADDR,
+	     &enableReuse,
+	     sizeof(enableReuse));
+
   int rc = bind(d_clientSocket,
 		reinterpret_cast<sockaddr *>(&d_clientAddr),
 		sizeof(d_clientAddr));

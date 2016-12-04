@@ -57,10 +57,6 @@ KVTCPCluster::enqueueRequest(int                    peerId,
     d_hasWork.notify_one();
   }
   // UNLOCK
-
-  LOG_INFO << "Enqueued a request: "
-	   << msg.DebugString()
-	   << LOG_END;
 }
 
 KVTCPCluster::KVTCPCluster(const KVConfiguration&  config,
@@ -320,6 +316,13 @@ KVTCPCluster::thread()
     _exit(1);
   }
 
+  int enableReuse = 1;
+  setsockopt(d_socket,
+	     SOL_SOCKET,
+	     SO_REUSEADDR,
+	     &enableReuse,
+	     sizeof(enableReuse));
+
   int rc = bind(d_socket,
 		reinterpret_cast<sockaddr *>(&d_listenAddr),
 		sizeof(d_listenAddr));
@@ -369,8 +372,6 @@ KVTCPCluster::thread()
   while (d_running) {
     // LOCK
     {
-      std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
-
       logRaftStates();
       
       // TODO: implement stuff in the section of RULES FOR ALL
@@ -408,9 +409,7 @@ KVTCPCluster::thread()
 	LOG_INFO << "I am a follower."
 		 << LOG_END;
 
-	uniqueLock = waitAndProcessRaftEventFollower(std::move(uniqueLock),
-						     d_electionTimeout);
-	assert(uniqueLock.owns_lock());
+	waitAndProcessRaftEventFollower(d_electionTimeout);
 	
       } else if (d_leaderId != d_serverId &&
 		 d_votedFor == d_serverId) {
@@ -424,9 +423,7 @@ KVTCPCluster::thread()
 	
 	// Otherwise, we have not received enough votes yet. Continue
 	// processing requests and potentially timeout.
-	uniqueLock = waitAndProcessRaftEventCandidate(std::move(uniqueLock),
-						      d_electionTimeout);
-	assert(uniqueLock.owns_lock());
+        waitAndProcessRaftEventCandidate(d_electionTimeout);
       } else {
 	// We're the leader.
 	assert(d_serverId == d_leaderId);
@@ -440,9 +437,7 @@ KVTCPCluster::thread()
 	  d_commitIndex += 1;
 	}
 	
-	uniqueLock = waitAndProcessRaftEventLeader(std::move(uniqueLock),
-						   k_LEADER_WAIT);
-	assert(uniqueLock.owns_lock());
+	waitAndProcessRaftEventLeader(k_LEADER_WAIT);
       }
     }
     // UNLOCK
@@ -533,7 +528,6 @@ KVTCPCluster::incrementTerm()
   // LOCK
   std::lock_guard<std::mutex> guard(d_raftLock);
   d_currentTerm += 1;
-  d_votesReceived = 0;
   // UNLOCK
 }
 
@@ -547,8 +541,9 @@ KVTCPCluster::convertToCandidate()
   {
     std::lock_guard<std::mutex> guard(d_raftLock);
     // Vote for myself.
-    d_votesReceived += 1;
-    d_votedFor       = d_serverId;
+    d_votesReceived = 1;
+    d_votedFor      = d_serverId;
+    d_leaderId      = -1;
   }
   // UNLOCK
   
@@ -564,43 +559,51 @@ KVTCPCluster::convertToCandidate()
        it != d_serverSessions.end();
        ++it) {
     if (it->second) {
-      it->second->sendRequest(msg,
-			      /* Executed on kvserversession thread,
-				 or the timer scheduler's thread
-			      */			      
-			      [&](int                    peerId,
-				  RequestStatus          status,
-				  const KVServerMessage& req,
-				  const KVServerMessage& resp) {
-				if (status == KVServerSession::TIMEDOUT) {
-				  LOG_WARN << "Request for voting timed out."
-					   << LOG_END;
-				  return;
-				}
+      ServerSessionSP session = it->second;
+      session->sendRequest(msg,
+			   /* Executed on kvserversession thread,
+			      or the timer scheduler's thread
+			   */			      
+			   [=](int                    peerId,
+			       RequestStatus          status,
+			       const KVServerMessage& req,
+			       const KVServerMessage& resp) {
+			     // Bind the SP into the callback.
+			     if (!session->alive()) {
+			       LOG_WARN << "This session already died."
+					<< LOG_END;
+			       return;
+			     }
+			     
+			     if (status == KVServerSession::TIMEDOUT) {
+			       LOG_WARN << "Request for voting timed out."
+					<< LOG_END;
+			       return;
+			     }
 
-				switch (resp.server_message_case()) {
-				case KVServerMessage::kResponse: {
-				  // We could have incremented the term while waiting
-				  // for the response.
-				  if (resp.response().success() &&
-				      resp.response().term() == d_currentTerm) {
-				    LOG_ERROR << "Got a vote from peer = "
-					      << peerId
-					      << LOG_END;
-				    d_votesReceived += 1;
-				    d_hasWork.notify_one();
-				  } else if (resp.response().term() > d_currentTerm) {
-				    convertToFollower(resp.response().term());
-				  }
-				} break;
-				default: {
-				  LOG_ERROR << "Unexpected response type = "
-					    << resp.server_message_case()
-					    << LOG_END;
-				} break;
-				}
-			      },
-			      k_RPC_TIMEOUT);
+			     switch (resp.server_message_case()) {
+			     case KVServerMessage::kResponse: {
+			       // We could have incremented the term while waiting
+			       // for the response.
+			       if (resp.response().success() &&
+				   resp.response().term() == d_currentTerm) {
+				 LOG_ERROR << "Got a vote from peer = "
+					   << peerId
+					   << LOG_END;
+				 d_votesReceived += 1;
+				 d_hasWork.notify_one();
+			       } else if (resp.response().term() > d_currentTerm) {
+				 convertToFollower(resp.response().term());
+			       }
+			     } break;
+			     default: {
+			       LOG_ERROR << "Unexpected response type = "
+					 << resp.server_message_case()
+					 << LOG_END;
+			     } break;
+			     }
+			   },
+			   k_RPC_TIMEOUT);
     }
   }
 }
@@ -700,11 +703,18 @@ KVTCPCluster::processAppendEntries(int                    peerId,
   KVServerMessage msg;
   KVResponse& resp = *(msg.mutable_response());
   resp.set_term(d_currentTerm);
+
+  LOG_INFO << "Got appendEntries from peer = "
+	   << peerId
+	   << ", msg = "
+	   << request.DebugString()
+	   << LOG_END;
   
   if (request.term() < d_currentTerm) {
     resp.set_success(false);
   } else {
-    d_leaderId = request.leader_id();
+    d_currentTerm = request.term();
+    d_leaderId    = request.leader_id();
     
     int myLogTermAtRequestIndex  = -1;
     KVServiceRequest myLogEntryAtRequestIndex;
@@ -722,14 +732,14 @@ KVTCPCluster::processAppendEntries(int                    peerId,
 	  resp.set_success(true);
 	  // TODO: Actually do the appending here.
 	  int nextIndex = request.prev_log_index() + 1;
+	  if (nextIndex < d_logManager_p->numberOfLogEntries()) {
+	    d_logManager_p->removeEntries(nextIndex);
+	  }
+	  
 	  for (auto it = request.entries().begin();
 	       it != request.entries().end();
 	       ++it) {
 	    const KVServiceRequest& entryToAppend = *it;
-	    if (nextIndex < d_logManager_p->numberOfLogEntries()) {
-	      d_logManager_p->removeEntries(nextIndex);
-	    }
-	    
 	    d_logManager_p->append(request.term(),
 				   entryToAppend);
 	  }
@@ -741,6 +751,11 @@ KVTCPCluster::processAppendEntries(int                    peerId,
 				     d_logManager_p->numberOfLogEntries()-1);
 	  }
 	} else {
+	  LOG_ERROR << "AppendEntries() failed because"
+		    << " log term didn't match."
+		    << " my term = " << myLogTermAtRequestIndex
+		    << ", request term = " << request.prev_log_term()
+		    << LOG_END;
 	  // The term didn't match.
 	  resp.set_success(false);
 	}
@@ -761,6 +776,9 @@ KVTCPCluster::processAppendEntries(int                    peerId,
 	}
       }
     } else {
+      LOG_ERROR << "AppendEntries() failed because "
+		<< "prev log index is larger than my log storage size."
+		<< LOG_END;
       resp.set_success(false);
     }
   }
@@ -796,6 +814,32 @@ KVTCPCluster::logRaftStates()
 	    << ", votedFor = " << d_votedFor
 	    << " ]"
 	    << LOG_END;
+
+  // Log the next and match indices
+  if (d_leaderId == d_serverId) {
+    std::stringstream ss;
+
+    ss << "[";
+    for (int i = 0; i < d_config.servers_size(); ++i) {
+      if (i == d_leaderId) {
+	continue;
+      }
+
+      ss << ", [ "
+	 << i
+	 << " = ("
+	 << d_matchIndices[i]
+	 << ", "
+	 << d_nextIndices[i]
+	 << ")]";
+    }
+
+    ss << "]";
+
+    auto state = ss.str();
+    
+    LOG_ERROR << state << LOG_END;
+  }
   // UNLOCK
 }
 
@@ -806,7 +850,7 @@ KVTCPCluster::convertToLeader()
   std::lock_guard<std::mutex> guard(d_raftLock);
 
   d_leaderId = d_serverId;
-
+  
   // Reset next and match indicies.
   for (auto it = d_serverSessions.begin();
        it != d_serverSessions.end();
@@ -818,14 +862,10 @@ KVTCPCluster::convertToLeader()
   // UNLOCK
 }
 
-std::unique_lock<std::mutex>&&
-KVTCPCluster::waitAndProcessRaftEventFollower(
-			     std::unique_lock<std::mutex>&& lock,
-			     int                            waitTime)
+void
+KVTCPCluster::waitAndProcessRaftEventFollower(int waitTime)
 {
-  std::unique_lock<std::mutex> uniqueLock(std::move(lock));
-
-  assert(uniqueLock.owns_lock());
+  std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
 
   // Wait for up to election timeout amount of milliseconds.
   // LOCK is released upon wait.
@@ -858,18 +898,12 @@ KVTCPCluster::waitAndProcessRaftEventFollower(
 		     request.d_request);
     }
   }
-  
-  return std::move(uniqueLock);
 }
 
-std::unique_lock<std::mutex>&&
-KVTCPCluster::waitAndProcessRaftEventCandidate(
-			     std::unique_lock<std::mutex>&& lock,
-			     int                            waitTime)
+void
+KVTCPCluster::waitAndProcessRaftEventCandidate(int waitTime)
 {
-  std::unique_lock<std::mutex> uniqueLock(std::move(lock));
-
-  assert(uniqueLock.owns_lock());
+  std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
 
   // Wait for up to election timeout amount of milliseconds.
   // LOCK is released upon wait.
@@ -897,7 +931,7 @@ KVTCPCluster::waitAndProcessRaftEventCandidate(
 	     << LOG_END;
     
     convertToLeader();
-    return std::move(uniqueLock);                      // RETURN
+    return;
   }
   
   // Election time out triggered.
@@ -915,17 +949,12 @@ KVTCPCluster::waitAndProcessRaftEventCandidate(
 		     request.d_request);
     }
   }
-  
-  return std::move(uniqueLock);
 }
 
-std::unique_lock<std::mutex>&&
-KVTCPCluster::waitAndProcessRaftEventLeader(std::unique_lock<std::mutex>&& lock,
-					    int                            waitTime)
+void
+KVTCPCluster::waitAndProcessRaftEventLeader(int waitTime)
 {
-  std::unique_lock<std::mutex> uniqueLock(std::move(lock));
-
-  assert(uniqueLock.owns_lock());
+  std::unique_lock<std::mutex> uniqueLock(d_outstandingRequestsLock);
 
   // Wait for up to election timeout amount of milliseconds.
   // LOCK is released upon wait.
@@ -946,7 +975,6 @@ KVTCPCluster::waitAndProcessRaftEventLeader(std::unique_lock<std::mutex>&& lock,
   // Election time out triggered.
   if (status == std::cv_status::timeout) {
     assert(d_outstandingRequests.empty());
-    // TODO: We should send empty AppendEntries requests here.
     sendAppendEntries();
   } else {
     if (!d_outstandingRequests.empty()) {
@@ -957,8 +985,6 @@ KVTCPCluster::waitAndProcessRaftEventLeader(std::unique_lock<std::mutex>&& lock,
 		     request.d_request);
     }
   }
-  
-  return std::move(uniqueLock);
 }
 
 bool
@@ -984,14 +1010,26 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
 {
   KVServerMessage msg;
   KVAppendEntries& request = *(msg.mutable_append_entries());
+
+  int peerNextIndex = -1;
+
+  // LOCK
+  {
+    std::lock_guard<std::mutex> guard(d_raftLock);
+    peerNextIndex = d_nextIndices[peerId];
+  }
+  // UNLOCK
   
   request.set_term(d_currentTerm);
   request.set_leader_id(d_serverId);
   request.set_leader_commit(d_commitIndex);
-  request.clear_entries();
-  request.set_prev_log_index(d_logManager_p->numberOfLogEntries() - 1);
+  request.set_prev_log_index(peerNextIndex - 1);
+  request.set_prev_log_term(-1);
 
-  int peerNextIndex = d_nextIndices[peerId];
+  LOG_ERROR << "Peer next index = "
+	    << peerNextIndex
+	    << LOG_END;
+  LOG_ERROR << request.DebugString() << LOG_END;
 
   // Check if we have this entry or not.
   if (peerNextIndex < d_logManager_p->numberOfLogEntries()) {
@@ -1002,81 +1040,107 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
 			     &entry,
 			     peerNextIndex);
     *(request.add_entries()) = entry;
-    request.set_prev_log_index(peerNextIndex - 1);
 
-    if (peerNextIndex > 0) {
+    if (peerNextIndex - 1 >= 0) {
       int              prevTerm;
       KVServiceRequest prevEntry;
       d_logManager_p->retrieve(&prevTerm,
 			       &prevEntry,
 			       peerNextIndex - 1);
       request.set_prev_log_term(prevTerm);
+
+      auto msgDump = msg.DebugString();
+      LOG_INFO << "Sending appendEntries() = "
+	       << msgDump
+	       << ", to peer = "
+	       << peerId
+	       << LOG_END;
+      assert(request.prev_log_term() != -1);
     }
   }
 
-  d_serverSessions[peerId]->sendRequest(msg,
-					/* Executed on the server session thread
-					   or the timer thread in case of a
-					   timeout.
-					*/
-					// Note that we capture by
-					// value the variable
-					// peerNextIndex and request
-					// in the body of this lambda.
-					[=](int                    peerId,
-					    RequestStatus          status,
-					    const KVServerMessage& req,
-					    const KVServerMessage& resp){
-					  if (status == KVServerSession::TIMEDOUT) {
-					    LOG_WARN << "Append entries to peer = "
-						     << peerId
-						     << " timed out."
-						     << LOG_END;
-					    return;
-					  }
+  
+  ServerSessionSP session = d_serverSessions[peerId];
 
-					  switch(resp.server_message_case()) {
-					  case KVServerMessage::kResponse: {
-					    const KVResponse& response = resp.response();
+  session->sendRequest(msg,
+		       /* Executed on the server session thread
+			  or the timer thread in case of a
+			  timeout.
+		       */
+		       // Note that we capture by
+		       // value the variable
+		       // peerNextIndex and request
+		       // in the body of this lambda.
+		       [=](int                    peerId,
+			   RequestStatus          status,
+			   const KVServerMessage& req,
+			   const KVServerMessage& resp){
+			 if (!session->alive()) {
+			   LOG_WARN << "This session already died."
+				    << LOG_END;
+			   return;
+			 }
+			 
+			 if (status == KVServerSession::TIMEDOUT) {
+			   LOG_WARN << "Append entries to peer = "
+				    << peerId
+				    << " timed out."
+				    << LOG_END;
+			   return;
+			 }
 
-					    if (response.term() > d_currentTerm) {
-					      LOG_WARN << "Demoting myself "
-						       << "to follower because "
-						       << "I received a response "
-						       << "with higher term."
-						       << LOG_END;
-					      assert(!response.success());
-					      convertToFollower(response.term());
-					      return;
-					    }
+			 LOG_ERROR << "Got appendEntries() response = "
+				   << resp.DebugString()
+				   << " from peer = "
+				   << peerId
+				   << LOG_END;
+			 
+			 switch(resp.server_message_case()) {
+			 case KVServerMessage::kResponse: {
+			   const KVResponse& response = resp.response();
+			   
+			   if (response.term() > d_currentTerm) {
+			     LOG_WARN << "Demoting myself "
+				      << "to follower because "
+				      << "I received a response "
+				      << "with higher term."
+				      << LOG_END;
+			     assert(!response.success());
+			     convertToFollower(response.term());
+			     return;
+			   }
+			   
+			   if (response.success()) {
+			     setRaftIndicesForPeer(
+				   peerId,
+				   peerNextIndex
+				        + request.entries().size(),
+			           peerNextIndex
+				        + request.entries().size() - 1);
+			   } else {
+			     // Will retry the next
+			     // time leader loops
+			     // around.
+			     {
+			       // LOCK
+			       std::lock_guard<std::mutex> guard(d_raftLock);
+			       d_nextIndices[peerId] -= 1;
 
-					    if (response.success()) {
-					      setRaftIndicesForPeer(
-						 peerId,
-						 peerNextIndex
-						   + request.entries().size(),
-						 peerNextIndex
-						   + request.entries().size() - 1);
-					    } else {
-					      // Will retry the next
-					      // time leader loops
-					      // around.
-					      {
-						  // LOCK
-						std::lock_guard<std::mutex> guard(d_raftLock);
-						d_nextIndices[peerId] -= 1;
-					      }
-					      // UNLOCK
-					    }
-					  } break;
-					  default: {
-					    LOG_ERROR << "Unexpected message type = "
-						      << resp.server_message_case()
-						      << LOG_END;
-					  } break;
-					  }
-					},
-					k_RPC_TIMEOUT);
+			       LOG_ERROR << "Decrementing next index for peer = "
+					 << peerId
+					 << LOG_END;
+			     }
+			     // UNLOCK
+			   }
+			 } break;
+			 default: {
+			   LOG_ERROR << "Unexpected message type = "
+				     << resp.server_message_case()
+				     << LOG_END;
+			 } break;
+			 }
+		       },
+		       k_RPC_TIMEOUT);
 }
 
 void

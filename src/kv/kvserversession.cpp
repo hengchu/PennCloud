@@ -50,7 +50,8 @@ KVServerSession::~KVServerSession()
 }
 
 void
-KVServerSession::requestTimedOut(int contextId)
+KVServerSession::requestTimedOut(std::shared_ptr<KVServerSession> self,
+				 int                              contextId)
 // Runs on the timer scheduler thread.
 {
   LOG_INFO << "Request = "
@@ -58,6 +59,14 @@ KVServerSession::requestTimedOut(int contextId)
 	   << " timed out, removing it from the context map."
 	   << LOG_END;
 
+  if (!self->alive()) {
+    LOG_WARN << "Peer["
+	     << d_peerId
+	     <<"] a dead server session. No need to do anything else."
+	     << LOG_END;
+    return;
+  }
+  
   RequestCallBack cb;
   KVServerMessage req;
   
@@ -96,12 +105,6 @@ KVServerSession::threadLoop()
       d_alive = false;
       break;
     }
-
-    LOG_DEBUG << "Got a message from server = "
-	      << d_peerId
-	      << ", request = "
-	      << serverMessage.DebugString()
-	      << LOG_END;
     
     int contextId = serverMessage.context_id();
 
@@ -171,6 +174,8 @@ KVServerSession::stop()
     }
   }
 
+  d_alive = false;
+
   if (d_thread.joinable()) {
     d_thread.join();
   }
@@ -218,6 +223,7 @@ KVServerSession::sendRequest(const KVServerMessage& message,
 				0,
 				std::bind(&KVServerSession::requestTimedOut,
 					  this,
+					  shared_from_this(),
 					  int(d_contextId)));
       }
       

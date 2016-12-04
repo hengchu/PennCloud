@@ -9,8 +9,9 @@
 #include <mutex>
 #include <timereventscheduler.h>
 #include <cstdint>
+#include <memory>
 
-class KVServerSession {
+class KVServerSession : public std::enable_shared_from_this<KVServerSession> {
   // This class defines a mechanism for the server sessions.
  public:
   
@@ -76,7 +77,8 @@ class KVServerSession {
   TimerEventScheduler       *d_timerEventScheduler_p;
   // The timer. Held, not owned.
 
-  void requestTimedOut(int contextId);
+  void requestTimedOut(std::shared_ptr<KVServerSession> self,
+		       int contextId);
   // Remove this request from the outstanding map.
   // Note that it runs on the timer scheduler's thread.
   
