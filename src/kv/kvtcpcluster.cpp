@@ -716,7 +716,7 @@ KVTCPCluster::processAppendEntries(int                    peerId,
     d_currentTerm = request.term();
     d_leaderId    = request.leader_id();
     
-    int myLogTermAtRequestIndex  = -1;
+    int myLogTermAtRequestIndex = -1;
     KVServiceRequest myLogEntryAtRequestIndex;
     
     if (request.prev_log_index()
@@ -762,6 +762,9 @@ KVTCPCluster::processAppendEntries(int                    peerId,
       } else {
 	// There was no previous log entry.
 	resp.set_success(true);
+	assert(request.prev_log_index() == -1);
+	
+	d_logManager_p->removeEntries(0);
 	for (auto it = request.entries().begin();
 	     it != request.entries().end();
 	     ++it) {
