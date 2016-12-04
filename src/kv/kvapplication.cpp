@@ -20,6 +20,7 @@ KVApplication::KVApplication(const KVConfiguration& config,
 			     int                    serverId)
   : d_running(false)
   , d_config(config)
+  , d_clientId(0)
   , d_serverId(serverId)
   , d_clientSocket(-1)
   , d_clientAddr()
