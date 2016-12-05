@@ -15,9 +15,6 @@ message ServerConfig {
 
   // The address on which the server listens for clients.
   Address client_addr = 2;
-
-  // Whether this server is a master or not.
-  bool master = 3;
 }
 
 message KVConfiguration {
