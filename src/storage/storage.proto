@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+message CreateRequest {
+  string filename = 1;
+  string contents = 2;
+}
+
+message CreateDirectoryRequest {
+  string directory = 1;
+}
+
+message UpdateRequest {
+  string filename = 1;
+  string contents = 2;
+}
+
+message GetDirectoryRequest {
+  string directory = 1;
+}
+
+message GetFileRequest {
+  string filename = 1;
+}
+
+message DeleteRequest {
+  string filename = 1;
+}
+
+message StorageServiceRequest {
+  int32 request_id = 1;
+  
+  oneof service_request {
+    CreateRequest c = 2;
+    CreateDirectoryRequest cd = 3;
+    UpdateRequest u = 4;
+    GetDirectoryRequest gd = 5;
+    GetFileRequest gf = 6;
+    DeleteRequest d = 7;
+  };
+};
+
+enum ResponseCode {
+  SUCCESS = 0;
+  FAILURE = 1;
+  INVALID = 2;
+};
+
+message GenericResponse {
+};
+
+message GetDirectoryResponse {
+  string page = 1;
+};
+
+message GetFileResponse {
+  string contents = 1;
+};
+
+message FailureResponse {
+  string error_message = 1;
+};
+
+message StorageServiceResponse {
+  int32 request_id = 1;
+  
+  ResponseCode response_code = 2;
+  oneof service_response {
+    GenericResponse g = 3;
+    GetDirectoryResponse p = 4;
+    GetFileResponse c = 5;
+    FailureResponse failure = 6;
+  };
+};

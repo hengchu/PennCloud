@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+// Get info about messages
+message MessagesRequest {
+  string user = 1;
+};
+
+// Delete a message 
+message DeleteRequest {
+  int32 message_id = 1;
+};
+
+// Get a message
+message GetRequest {
+  int32 message_id = 1;
+};
+
+message WebmailServiceRequest {
+  int32 request_id = 1;
+
+  oneof service_request {
+    MessagesRequest m = 2;
+    DeleteRequest d = 3;
+    GetRequest g = 4;
+  };
+};
+
+enum ResponseCode {
+  SUCCESS = 0;
+  FAILURE = 1;
+  INVALID = 2;
+};
+
+message GetResponse {
+  string message = 1;
+};
+
+message MessagesResponse {
+  string page = 1;
+};
+
+message GenericResponse {
+};
+
+message FailureResponse {
+  string error = 1;
+};
+
+message WebmailServiceResponse {
+  int32 request_id = 1;
+
+  ResponseCode response_code = 2;
+
+  oneof service_response {
+    GetResponse get = 3;
+    GenericResponse generic = 4;
+    MessagesResponse m = 5;
+    FailureResponse f = 6;
+  };
+};
+
