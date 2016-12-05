@@ -28,14 +28,15 @@ message DeleteRequest {
 
 message StorageServiceRequest {
   int32 request_id = 1;
-  
+  string user = 2;
+ 
   oneof service_request {
-    CreateRequest c = 2;
-    CreateDirectoryRequest cd = 3;
-    UpdateRequest u = 4;
-    GetDirectoryRequest gd = 5;
-    GetFileRequest gf = 6;
-    DeleteRequest d = 7;
+    CreateRequest c = 3;
+    CreateDirectoryRequest cd = 4;
+    UpdateRequest u = 5;
+    GetDirectoryRequest gd = 6;
+    GetFileRequest gf = 7;
+    DeleteRequest d = 8;
   };
 };
 
@@ -62,12 +63,13 @@ message FailureResponse {
 
 message StorageServiceResponse {
   int32 request_id = 1;
+  string user = 2;
   
-  ResponseCode response_code = 2;
+  ResponseCode response_code = 3;
   oneof service_response {
-    GenericResponse g = 3;
-    GetDirectoryResponse p = 4;
-    GetFileResponse c = 5;
-    FailureResponse failure = 6;
+    GenericResponse g = 4;
+    GetDirectoryResponse p = 5;
+    GetFileResponse c = 6;
+    FailureResponse failure = 7;
   };
 };

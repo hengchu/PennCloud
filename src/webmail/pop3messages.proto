@@ -2,7 +2,6 @@ syntax = "proto3";
 
 // Get info about messages
 message MessagesRequest {
-  string user = 1;
 };
 
 // Delete a message 
@@ -17,11 +16,12 @@ message GetRequest {
 
 message WebmailServiceRequest {
   int32 request_id = 1;
+  string user = 2;
 
   oneof service_request {
-    MessagesRequest m = 2;
-    DeleteRequest d = 3;
-    GetRequest g = 4;
+    MessagesRequest m = 3;
+    DeleteRequest d = 4;
+    GetRequest g = 5;
   };
 };
 
@@ -48,14 +48,15 @@ message FailureResponse {
 
 message WebmailServiceResponse {
   int32 request_id = 1;
+  string user = 2;
 
-  ResponseCode response_code = 2;
+  ResponseCode response_code = 3;
 
   oneof service_response {
-    GetResponse get = 3;
-    GenericResponse generic = 4;
-    MessagesResponse m = 5;
-    FailureResponse f = 6;
+    GetResponse get = 4;
+    GenericResponse generic = 5;
+    MessagesResponse m = 6;
+    FailureResponse f = 7;
   };
 };
 
