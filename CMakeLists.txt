@@ -85,7 +85,7 @@ target_link_libraries(http    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT
 target_link_libraries(kv      infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 target_link_libraries(storage infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 target_link_libraries(mail    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
-target_link_libraries(kvtool  infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(kvtool  infra message ${PROTOBUF} ${CMAKE_THREAD_LIBS_INIT})
 
 # Add dependency to protoc generated files
 add_dependencies(infra   PROTO_SRCS)
