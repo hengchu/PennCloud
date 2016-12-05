@@ -195,19 +195,13 @@ class KVTCPCluster {
   void logRaftStates();
   // Dump the raft states.
 
-  std::unique_lock<std::mutex>&&
-    waitAndProcessRaftEventFollower(std::unique_lock<std::mutex>&& lock,
-				    int                            waitTime);
+  void waitAndProcessRaftEventFollower(int waitTime);
   // One iteration of the raft event loop for a follower.
 
-  std::unique_lock<std::mutex>&&
-    waitAndProcessRaftEventCandidate(std::unique_lock<std::mutex>&& lock,
-				     int                            waitTime);
+  void waitAndProcessRaftEventCandidate(int waitTime);
   // One iteration of the raft event loop for a candidate.
-  
-  std::unique_lock<std::mutex>&&
-    waitAndProcessRaftEventLeader(std::unique_lock<std::mutex>&& lock,
-				  int                            waitTime);
+
+  void waitAndProcessRaftEventLeader(int waitTime);
   // One iteration of the raft event loop for a leader.
   
  public:

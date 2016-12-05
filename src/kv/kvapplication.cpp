@@ -20,6 +20,7 @@ KVApplication::KVApplication(const KVConfiguration& config,
 			     int                    serverId)
   : d_running(false)
   , d_config(config)
+  , d_clientId(0)
   , d_serverId(serverId)
   , d_clientSocket(-1)
   , d_clientAddr()
@@ -62,6 +63,13 @@ KVApplication::listenForClients()
 	      << LOG_END;
     _exit(1);
   }
+
+  int enableReuse = 1;
+  setsockopt(d_clientSocket,
+	     SOL_SOCKET,
+	     SO_REUSEADDR,
+	     &enableReuse,
+	     sizeof(enableReuse));
 
   int rc = bind(d_clientSocket,
 		reinterpret_cast<sockaddr *>(&d_clientAddr),
