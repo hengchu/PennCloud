@@ -20,12 +20,14 @@ include_directories(${PROJECT_SRC}/kvtool)
 include_directories(${PROJECT_SRC}/storage)
 include_directories(${PROJECT_SRC}/webmail)
 include_directories(${PROJECT_SRC}/lib)
+include_directories(${PROJECT_SRC}/smtp)
 include_directories(${BUILD_DIR})
 include_directories(${BUILD_DIR}/protobuf-build/include)
 
 # Set the source directories
 file(GLOB HTTP_SRC    ${PROJECT_SRC}/http/*.cpp)
 file(GLOB KV_SRC      ${PROJECT_SRC}/kv/*.cpp)
+file(GLOB SMTP_SRC    ${PROJECT_SRC}/smtp/*.cpp)
 file(GLOB STORAGE_SRC ${PROJECT_SRC}/storage/*.cpp)
 file(GLOB MAIL_SRC    ${PROJECT_SRC}/webmail/*.cpp)
 file(GLOB KVTOOL_SRC  ${PROJECT_SRC}/kvtool/*.cpp)
@@ -79,6 +81,7 @@ add_executable(kv      ${KV_SRC})
 add_executable(storage ${STORAGE_SRC})
 add_executable(mail    ${MAIL_SRC})
 add_executable(kvtool  ${KVTOOL_SRC})
+add_executable(smtp    ${SMTP_SRC})
 
 # Link the executables with the infra library
 target_link_libraries(http    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
@@ -86,6 +89,7 @@ target_link_libraries(kv      infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT
 target_link_libraries(storage infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 target_link_libraries(mail    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 target_link_libraries(kvtool  infra message ${PROTOBUF} ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(smtp    infra ${PROTOBUF} message ${CMAKE_THREAD_LIBS_INIT})
 
 # Add dependency to protoc generated files
 add_dependencies(infra   PROTO_SRCS)
@@ -94,3 +98,4 @@ add_dependencies(kv      PROTO_SRCS)
 add_dependencies(storage PROTO_SRCS)
 add_dependencies(mail    PROTO_SRCS)
 add_dependencies(kvtool  PROTO_SRCS)
+add_dependencies(smtp    PROTO_SRCS)

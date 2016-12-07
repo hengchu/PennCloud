@@ -30,6 +30,7 @@
 
 # Emacs
 *.*~
+*.swp
 
 # Ignore CMake generated files
 build/CMakeCache.txt
