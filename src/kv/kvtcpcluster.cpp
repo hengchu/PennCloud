@@ -9,6 +9,8 @@
 #include <functional>
 #include <random>
 
+using namespace kvservice;
+
 namespace {
 
   const int k_BACKLOG_SIZE = 10;

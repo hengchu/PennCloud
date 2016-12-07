@@ -11,8 +11,8 @@ class KVClientSession {
   // This class implements a mechanism that is the session between a
   // KV server and a client.
  public:
-  using CallBack = std::function<void(int                     clientId,
-				      const KVServiceRequest& request)>;
+  using CallBack = std::function<void(int                                clientId,
+				      const kvservice::KVServiceRequest& request)>;
   // A request handler callback.
   
  private:
@@ -67,8 +67,8 @@ class KVClientSession {
   // Stop the request processing loop. Return 0 on success, non-zero
   // code on failure.
 
-  int sendResponse(int                      requestId,
-		   const KVServiceResponse& response);
+  int sendResponse(int                                 requestId,
+		   const kvservice::KVServiceResponse& response);
   // Send a response corresponding to the given request id.
 
   int clientId();

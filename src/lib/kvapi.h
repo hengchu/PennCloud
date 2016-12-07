@@ -49,8 +49,8 @@ class KVSession {
   // Initiate the connection. Blocks until either the session is
   // connected to the server, or returns a non-zero code for failure.
 
-  int request(KVServiceResponse       *response,
-	      const KVServiceRequest&  request);
+  int request(kvservice::KVServiceResponse       *response,
+	      const kvservice::KVServiceRequest&  request);
   // Send the request to the server, blocks until a response is
   // received.  Or until an error occurs and a non-zero error code is
   // returned.

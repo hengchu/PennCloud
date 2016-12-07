@@ -3,6 +3,8 @@
 #include <protoutil.h>
 #include <unistd.h>
 
+using namespace kvservice;
+
 KVClientSession::KVClientSession(int             clientId,
 				 int             socket,
 				 const CallBack& requestHandler)

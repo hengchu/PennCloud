@@ -36,7 +36,7 @@ message KVAppendEntries {
 
   // The entries to append, may be empty so the
   // message acts as a heartbeat.
-  repeated KVServiceRequest entries = 6;
+  repeated kvservice.KVServiceRequest entries = 6;
 }
 
 message KVRequestVote {
