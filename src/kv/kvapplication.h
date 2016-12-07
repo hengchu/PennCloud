@@ -37,7 +37,7 @@ class KVApplication : public KVLogManager {
 
   struct LogEntry {
     int              d_term;
-    KVServiceRequest d_request;
+    kvservice::KVServiceRequest d_request;
   };
   
   using ClientSessionSP = std::shared_ptr<KVClientSession>;
@@ -82,16 +82,16 @@ class KVApplication : public KVLogManager {
   void listenForClients();
   // Listen for incoming client connections.
 
-  void handleClientRequest(int                     clientId,
-			   const KVServiceRequest& request);
+  void handleClientRequest(int                                clientId,
+			   const kvservice::KVServiceRequest& request);
   // Process the client request.
 
   void reapDeadClients();
   // Remove all the dead clients from the map.
 
-  void sendResponseToClient(int                      clientId,
-			    int                      requestId,
-			    const KVServiceResponse& resp);
+  void sendResponseToClient(int                                 clientId,
+			    int                                 requestId,
+			    const kvservice::KVServiceResponse& resp);
   // Send the response to the given client.
   
  public:
@@ -114,13 +114,13 @@ class KVApplication : public KVLogManager {
   int numberOfLogEntries();
   // Return the number of log entries. Thread-safe.
 
-  int append(int                     term,
-	     const KVServiceRequest& request);
+  int append(int                                term,
+	     const kvservice::KVServiceRequest& request);
   // Append a log entry, thread-safe.
 
-  void retrieve(int              *term,
-		KVServiceRequest *entry,
-		int               index);
+  void retrieve(int                         *term,
+		kvservice::KVServiceRequest *entry,
+		int                          index);
   // Retrieve the entry at the given index. Thread-safe.
 
   void applyLog(int index);

@@ -16,6 +16,8 @@ namespace {
   const int k_BACKLOG_SIZE = 10;
 }
 
+using namespace kvservice;
+
 KVApplication::KVApplication(const KVConfiguration& config,
 			     int                    serverId)
   : d_running(false)
@@ -167,6 +169,8 @@ KVApplication::handleClientRequest(int                     clientId,
 				   const KVServiceRequest& request)
 // Executed on client session thread.
 {
+  using namespace kvservice;
+  
   switch (request.service_request_case()) {
   case KVServiceRequest::kGet:
   case KVServiceRequest::kPut:

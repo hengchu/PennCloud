@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <semaphore.h>
 
+using namespace kvservice;
+
 std::string
 readFile(const char *path)
 {

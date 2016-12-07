@@ -14,13 +14,13 @@ class KVLogManager {
   virtual int numberOfLogEntries() = 0;
   // Return a count of the number of log entries.
 
-  virtual int append(int                     term,
-		     const KVServiceRequest& entry) = 0;
+  virtual int append(int                                term,
+		     const kvservice::KVServiceRequest& entry) = 0;
   // Append the entry with the given term, and returns its index.
 
-  virtual void retrieve(int              *term,
-			KVServiceRequest *entry,
-			int               index) = 0;
+  virtual void retrieve(int                         *term,
+			kvservice::KVServiceRequest *entry,
+			int                          index) = 0;
   // Retrieves the log entry at the given index.
   // It's undefined behavior if index >= numberOfLogEntries();
 

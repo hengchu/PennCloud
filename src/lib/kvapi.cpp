@@ -10,6 +10,8 @@
 #include <future>
 #include <cassert>
 
+using namespace kvservice;
+
 KVSession::KVSession(const std::string& serverAddr,
 		     int                port)
   : d_socket(-1)
