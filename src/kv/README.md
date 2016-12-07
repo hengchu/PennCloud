@@ -23,6 +23,8 @@ servers {
     ip_address: "127.0.0.1"
     port: 3500
   }
+
+  log_file_path: "./server0.dat"
 }
 
 servers {
@@ -35,6 +37,8 @@ servers {
     ip_address: "127.0.0.1"
     port: 3501
   }
+
+  log_file_path: "./server1.dat"
 }
 
 servers {
@@ -47,6 +51,8 @@ servers {
     ip_address: "127.0.0.1"
     port: 3502
   }
+
+  log_file_path: "./server2.dat"
 }
 
 servers {
@@ -59,6 +65,8 @@ servers {
     ip_address: "127.0.0.1"
     port: 3503
   }
+
+  log_file_path: "./server3.dat"
 }
 ```
 
