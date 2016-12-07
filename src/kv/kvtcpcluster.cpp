@@ -1270,3 +1270,11 @@ KVTCPCluster::leaderClientAddress(std::string *ip,
   *ip = d_config.servers(leader).client_addr().ip_address();
   *port = d_config.servers(leader).client_addr().port();
 }
+
+bool
+KVTCPCluster::ready()
+{
+  // More than half of the servers are online.
+  return ((d_serverSessions.size() + 1) > d_config.servers_size() / 2)
+    && (d_leaderId != -1);
+}

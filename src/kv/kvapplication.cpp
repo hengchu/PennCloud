@@ -234,6 +234,10 @@ KVApplication::handleClientRequest(int                     clientId,
 // Executed on client session thread.
 {
   using namespace kvservice;
+
+  // Busy wait until the cluster comes up. Hopefully this is just a
+  // very short wait.
+  while (!d_cluster_up->ready());
   
   switch (request.service_request_case()) {
   case KVServiceRequest::kGet:

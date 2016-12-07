@@ -233,6 +233,9 @@ class KVTCPCluster {
   bool isLeader();
   // Returns true if we're currently the leader.
 
+  bool ready();
+  // Returns true if the cluster is ready.
+  
   void notifyWhenApplied(int                          index,
 			 const std::function<void()>& cb);
   // Run the callback when log with the given index is commited.
