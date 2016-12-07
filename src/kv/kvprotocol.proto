@@ -13,6 +13,14 @@ message KVHeartbeat {
   string payload = 1;
 }
 
+message KVPersistentLogEntry {
+  // The term of this log entry.
+  int32 term = 1;
+
+  // The actual log.
+  kvservice.KVServiceRequest log = 2;
+}
+
 message KVAppendEntries {
   // A message from RAFT leader to followers,
   // asking them to append entries.
@@ -36,7 +44,7 @@ message KVAppendEntries {
 
   // The entries to append, may be empty so the
   // message acts as a heartbeat.
-  repeated kvservice.KVServiceRequest entries = 6;
+  repeated KVPersistentLogEntry entries = 6;
 }
 
 message KVRequestVote {

@@ -8,6 +8,8 @@
 #include <map>
 #include <memory>
 #include <queue>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <fstream>
 
 #ifndef INCLUDED_KVTCPCLUSTER
 #include <kvtcpcluster.h>
@@ -36,11 +38,13 @@ class KVApplication : public KVLogManager {
   };
 
   struct LogEntry {
-    int              d_term;
+    int                         d_term;
     kvservice::KVServiceRequest d_request;
   };
   
-  using ClientSessionSP = std::shared_ptr<KVClientSession>;
+  using ClientSessionSP  = std::shared_ptr<KVClientSession>;
+  using FileOutputStream = google::protobuf::io::FileOutputStream;
+  using FileInputStream  = google::protobuf::io::FileInputStream;
 
   std::atomic_bool                 d_running;
   // Whether this application is currently running.
@@ -61,7 +65,7 @@ class KVApplication : public KVLogManager {
   sockaddr_in                      d_clientAddr;
   // The address to bind to the client socket.
   
-  KVTCPCluster                     d_cluster;
+  std::unique_ptr<KVTCPCluster>    d_cluster_up;
   // The cluster of servers.
 
   KVStore                          d_storage;
@@ -75,6 +79,18 @@ class KVApplication : public KVLogManager {
 
   std::vector<LogEntry>            d_logs;
   // The requests this server has processed.
+
+  int                              d_persistedLogIndex;
+  // Index of the last log entry that was persistend to the file.
+  
+  int                              d_persistentLogsFd;
+  // A file descriptor that holds the sequence of log entries this
+  // server has persisted.
+
+  std::unique_ptr<FileOutputStream>
+                                   d_persistentLogsOutputStream_up;
+  // The protobuf stream associated with d_persistentLogs and used for
+  // output.
 
   std::mutex                       d_logsLock;
   // A lock to protect the log entries.
@@ -93,6 +109,11 @@ class KVApplication : public KVLogManager {
 			    int                                 requestId,
 			    const kvservice::KVServiceResponse& resp);
   // Send the response to the given client.
+
+  int loadPersistentLogs();
+  // Load persistent logs into memory. Ran once in the constructor. It
+  // returns the position into d_persistentLogsFd where the last
+  // successful read ended.
   
  public:
   KVApplication(const KVConfiguration& config,

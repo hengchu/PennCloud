@@ -1,5 +1,5 @@
 #include <protoutil.h>
-
+#include <sstream>
 #include <google/protobuf/io/coded_stream.h>
 
 bool ProtoUtil::writeDelimitedTo(
@@ -51,4 +51,20 @@ bool ProtoUtil::readDelimitedFrom(
   input.PopLimit(limit);
 
   return true;
+}
+
+std::string
+ProtoUtil::truncatedDebugString(
+  const google::protobuf::Message& message,
+  int                              limit)
+{
+  auto debugStr = message.DebugString();
+  if (debugStr.size() > limit) {
+    std::stringstream ss;
+    ss << std::string(debugStr.begin(), debugStr.begin() + limit)
+       << "(truncated...)";
+    return ss.str();
+  } else {
+    return debugStr;
+  }
 }

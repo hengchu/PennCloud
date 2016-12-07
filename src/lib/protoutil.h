@@ -19,7 +19,12 @@ struct ProtoUtil {
 			 google::protobuf::MessageLite*             message);
   // Read a message out of the given rawInput. Return true on success,
   // false otherwise.
-  
+
+  static
+  std::string
+  truncatedDebugString(const google::protobuf::Message& message,
+		       int                              limit = 200);
+  // Truncate the DebugString() output of the message to the given limit.
 };
 
 #endif

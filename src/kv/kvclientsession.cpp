@@ -107,7 +107,7 @@ KVClientSession::threadLoop()
     LOG_DEBUG << "Got a request from client = "
 	      << d_clientId
 	      << " request = "
-	      << request.DebugString()
+	      << ProtoUtil::truncatedDebugString(request)
 	      << LOG_END;
     
     d_requestHandler(d_clientId, request);

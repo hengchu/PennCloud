@@ -207,10 +207,12 @@ class KVTCPCluster {
  public:
   KVTCPCluster(const KVConfiguration&  config,
 	       int                     serverId,
-	       KVLogManager           *logManager);
+	       KVLogManager           *logManager,
+	       int                     term);
   // Create a cluster. The callback is passed onto the server
   // sessions, and is used as the request handler for each of the
   // server session created.
+  // The term variable is the term loaded from persistent storage.
 
   KVTCPCluster(const KVTCPCluster& other) = delete;
   KVTCPCluster& operator=(const KVTCPCluster& rhs) = delete;

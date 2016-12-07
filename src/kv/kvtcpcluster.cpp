@@ -63,7 +63,8 @@ KVTCPCluster::enqueueRequest(int                    peerId,
 
 KVTCPCluster::KVTCPCluster(const KVConfiguration&  config,
 			   int                     serverId,
-			   KVLogManager           *logManager)
+			   KVLogManager           *logManager,
+			   int                     term)
   : d_config(config)
   , d_serverId(serverId)
   , d_logManager_p(logManager)
@@ -76,7 +77,7 @@ KVTCPCluster::KVTCPCluster(const KVConfiguration&  config,
   , d_votesReceived(0)
   , d_electionTimeout(0)
   , d_leaderId(-1)
-  , d_currentTerm(0)
+  , d_currentTerm(term)
   , d_votedFor(-1)
   , d_commitIndex(-1)
   , d_appliedIndex(-1)
@@ -110,6 +111,10 @@ KVTCPCluster::KVTCPCluster(const KVConfiguration&  config,
 	   << d_electionTimeout
 	   << " milliseconds on server = "
 	   << d_serverId
+	   << LOG_END;
+
+  LOG_INFO << "Term loaded from persistent storage is = "
+	   << d_currentTerm
 	   << LOG_END;
 }
 
@@ -720,7 +725,7 @@ KVTCPCluster::processAppendEntries(int                    peerId,
   LOG_INFO << "Got appendEntries from peer = "
 	   << peerId
 	   << ", msg = "
-	   << request.DebugString()
+	   << ProtoUtil::truncatedDebugString(request)
 	   << LOG_END;
   
   if (request.term() < d_currentTerm) {
@@ -752,8 +757,8 @@ KVTCPCluster::processAppendEntries(int                    peerId,
 	  for (auto it = request.entries().begin();
 	       it != request.entries().end();
 	       ++it) {
-	    const KVServiceRequest& entryToAppend = *it;
-	    d_logManager_p->append(request.term(),
+	    const KVServiceRequest& entryToAppend = it->log();
+	    d_logManager_p->append(it->term(),
 				   entryToAppend);
 	  }
 	  
@@ -781,8 +786,8 @@ KVTCPCluster::processAppendEntries(int                    peerId,
 	for (auto it = request.entries().begin();
 	     it != request.entries().end();
 	     ++it) {
-	  const KVServiceRequest& entryToAppend = *it;
-	  d_logManager_p->append(request.term(),
+	  const KVServiceRequest& entryToAppend = it->log();
+	  d_logManager_p->append(it->term(),
 				 entryToAppend);
 	}
 
@@ -842,7 +847,7 @@ KVTCPCluster::logRaftStates()
 
     LOG_ERROR << "Log[" << i << "]"
 	      << " = "
-	      << request.DebugString()
+	      << ProtoUtil::truncatedDebugString(request)
 	      << ", term = "
 	      << term
 	      << LOG_END;
@@ -1061,16 +1066,19 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
   LOG_ERROR << "Peer next index = "
 	    << peerNextIndex
 	    << LOG_END;
-  LOG_ERROR << request.DebugString() << LOG_END;
 
   // Check if we have this entry or not.
   if (peerNextIndex < d_logManager_p->numberOfLogEntries()) {
     // Send append entry with this entry.
     int              entryTerm;
-    KVServiceRequest entry;
+    KVServiceRequest logEntry;
     d_logManager_p->retrieve(&entryTerm,
-			     &entry,
+			     &logEntry,
 			     peerNextIndex);
+    
+    KVPersistentLogEntry entry;
+    entry.set_term(entryTerm);
+    (*entry.mutable_log()) = logEntry;
     *(request.mutable_entries())->Add() = entry;
     assert(request.mutable_entries()->size() == 1);
   }
@@ -1084,7 +1092,7 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
 			     peerNextIndex - 1);
     request.set_prev_log_term(prevTerm);
     
-    auto msgDump = msg.DebugString();
+    auto msgDump = ProtoUtil::truncatedDebugString(msg);
     LOG_INFO << "Sending appendEntries() = "
 	     << msgDump
 	     << ", to peer = "
@@ -1123,7 +1131,7 @@ KVTCPCluster::sendAppendEntriesToPeer(int peerId)
 			 }
 
 			 LOG_ERROR << "Got appendEntries() response = "
-				   << resp.DebugString()
+				   << ProtoUtil::truncatedDebugString(resp)
 				   << " from peer = "
 				   << peerId
 				   << LOG_END;

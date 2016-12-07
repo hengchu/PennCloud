@@ -11,6 +11,10 @@
 #include <cassert>
 #include <semaphore.h>
 #include <kvapi.h>
+#include <kvprotocol.pb.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 namespace {
   const int k_BACKLOG_SIZE = 10;
@@ -26,7 +30,10 @@ KVApplication::KVApplication(const KVConfiguration& config,
   , d_serverId(serverId)
   , d_clientSocket(-1)
   , d_clientAddr()
-  , d_cluster(config, serverId, this)
+  , d_cluster_up()
+  , d_persistedLogIndex(-1)
+  , d_persistentLogsFd(-1)
+  , d_persistentLogsOutputStream_up()
 {
   int port = d_config.servers(serverId).client_addr().port();
 
@@ -46,11 +53,68 @@ KVApplication::KVApplication(const KVConfiguration& config,
 	      << LOG_END;
     _exit(1);
   }
+
+  const std::string& logFilePath =
+    d_config.servers(d_serverId).log_file_path();
+  d_persistentLogsFd = open(logFilePath.c_str(),
+			    O_RDWR | O_CREAT);
+  d_persistentLogsOutputStream_up.reset(
+    new FileOutputStream(d_persistentLogsFd));
+
+  if (d_persistentLogsFd < 0) {
+    LOG_ERROR << "Failed to open persistent log file = "
+	      << logFilePath
+	      << ", error = "
+	      << std::strerror(errno)
+	      << LOG_END;
+    _exit(1);
+  }
+  
+  loadPersistentLogs();
+  
+  int term = 0;
+
+  if (d_logs.size() > 0) {
+    auto it = d_logs.rbegin();
+    term = it->d_term;
+  }
+  d_cluster_up.reset(
+    new KVTCPCluster(config, d_serverId, this, term));
 }
 
 KVApplication::~KVApplication()
 {
   // NOTHING
+}
+
+int
+KVApplication::loadPersistentLogs()
+{
+  bool success = true;
+  int  pos     = -1;
+
+  FileInputStream input(d_persistentLogsFd);
+  
+  do {
+    KVPersistentLogEntry logEntry;
+    pos     = lseek(d_persistentLogsFd, 0, SEEK_CUR);
+    success = ProtoUtil::readDelimitedFrom(&input,
+					   &logEntry);
+
+    if (success) {
+      LogEntry entry;
+      entry.d_term    = logEntry.term();
+      entry.d_request = logEntry.log();
+
+      d_logs.push_back(entry);
+    } else {
+      lseek(d_persistentLogsFd, pos, SEEK_SET);
+    }
+  } while (success);
+
+  d_persistedLogIndex = d_logs.size() - 1;
+
+  return pos;
 }
 
 void
@@ -177,16 +241,16 @@ KVApplication::handleClientRequest(int                     clientId,
   case KVServiceRequest::kDelete:
   case KVServiceRequest::kComparePut: {
     // OK
-    if (d_cluster.isLeader()) {
-      int currTerm = d_cluster.currentTerm();
+    if (d_cluster_up->isLeader()) {
+      int currTerm = d_cluster_up->currentTerm();
       int logIndex = append(currTerm, request);
 
       Semaphore appliedSemaphore(0);
       
-      d_cluster.notifyWhenApplied(logIndex,
-				  [&]() {
-				    appliedSemaphore.post();
-				  });
+      d_cluster_up->notifyWhenApplied(logIndex,
+				      [&]() {
+					appliedSemaphore.post();
+				      });
 
       LOG_INFO << "Waiting for client = " << clientId
 	       << "'s request to be applied."
@@ -222,8 +286,8 @@ KVApplication::handleClientRequest(int                     clientId,
       // Create a client session to the leader and forward the request.
       std::string leaderIP;
       int         leaderPort;
-      d_cluster.leaderClientAddress(&leaderIP,
-				    &leaderPort);
+      d_cluster_up->leaderClientAddress(&leaderIP,
+					&leaderPort);
 
       KVServiceResponse resp;
 
@@ -275,7 +339,7 @@ KVApplication::start()
   d_running = true;
 
   // Start the TCP cluster.
-  int rc = d_cluster.start();
+  int rc = d_cluster_up->start();
   if (rc != 0) {
     LOG_ERROR << "Failed to start TCPCluster, rc = "
 	      << rc
@@ -292,7 +356,7 @@ KVApplication::start()
 int
 KVApplication::stop()
 {
-  int rc = d_cluster.stop();
+  int rc = d_cluster_up->stop();
   if (rc != 0) {
     LOG_ERROR << "Failed to stop TCPCluster, rc = "
 	      << rc
@@ -356,6 +420,32 @@ KVApplication::applyLog(int index)
   {
     std::lock_guard<std::mutex> guard(d_logsLock);
     log = d_logs[index];
+
+    // Write this entry to the file.
+    if (index > d_persistedLogIndex) {
+      LOG_INFO << "Persisting Log["
+	       << index
+	       << "]"
+	       << LOG_END;
+      
+      KVPersistentLogEntry entry;
+      entry.set_term(log.d_term);
+      (*entry.mutable_log()) = log.d_request;
+
+      bool success = ProtoUtil::writeDelimitedTo(entry,
+						 d_persistentLogsOutputStream_up.get());
+
+      if (!success) {
+	LOG_ERROR << "Failed to persist log["
+		  << index
+		  << "]"
+		  << LOG_END;
+	assert(false);
+      }
+
+      d_persistentLogsOutputStream_up->Flush();
+      d_persistedLogIndex = index;
+    }
   }
   // UNLOCK
 
@@ -386,7 +476,7 @@ KVApplication::applyLog(int index)
   default:
     // Invalid request.
     LOG_ERROR << "Invalid log entry = "
-	      << request.DebugString()
+	      << ProtoUtil::truncatedDebugString(request)
 	      << LOG_END;
   }
 }
