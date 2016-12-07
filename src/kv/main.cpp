@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <google/protobuf/text_format.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <kvapi.h>
 
 struct RunParams {
   int         d_serverId;
@@ -50,24 +51,14 @@ int main(int argc, char *argv[])
   }
 
   KVConfiguration config;
-  std::ifstream   configInput;
-  
-  configInput.open(params.d_configFile);
-  google::protobuf::io::IstreamInputStream pConfigInput(&configInput);
-  
-  bool parseSuccess = google::protobuf::TextFormat::Parse(&pConfigInput,
-							  &config);
-
-  if (!parseSuccess) {
-    LOG_ERROR << "Failed to parse the configuration file: "
-	      << std::string(params.d_configFile)
+  int rc = KVSession::loadKVConfiguration(&config, params.d_configFile);
+  if (0 != rc) {
+    LOG_ERROR << "Failed to load configuration file at: "
+	      << params.d_configFile
 	      << LOG_END;
     _exit(1);
   }
-
-  std::string configString;
-  google::protobuf::TextFormat::PrintToString(config, &configString);
-
+  
   if (params.d_serverId >= config.servers_size() || params.d_serverId < 0) {
     LOG_ERROR << "Server id = "
 	      << params.d_serverId
@@ -77,7 +68,7 @@ int main(int argc, char *argv[])
   }
   
   KVApplication app(config, params.d_serverId);
-  int rc = app.start();
+  rc = app.start();
 
   if (0 != rc) {
     LOG_ERROR << "Failed to start application! "

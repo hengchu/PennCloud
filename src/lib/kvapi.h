@@ -7,6 +7,7 @@
 #include <protoutil.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <memory>
+#include <kvconfig.pb.h>
 
 class KVSession {
   // This class implements a mechanism for communication with a KV
@@ -57,6 +58,11 @@ class KVSession {
 
   int disconnect();
   // Shutdown the session.
+
+  static int loadKVConfiguration(KVConfiguration *config,
+				 const char      *path);
+  // Load the configuration from a file at the given path. Returns 0
+  // on success, or a non-zero code on failure.
 };
 
 #endif

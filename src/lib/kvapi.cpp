@@ -9,6 +9,8 @@
 #include <condition_variable>
 #include <future>
 #include <cassert>
+#include <fstream>
+#include <google/protobuf/text_format.h>
 
 using namespace kvservice;
 
@@ -117,4 +119,25 @@ KVSession::request(KVServiceResponse       *response,
   
   assert(response->request_id() == request.request_id());
   return 0;
+}
+
+int
+KVSession::loadKVConfiguration(KVConfiguration *output,
+			       const char      *path)
+{
+  KVConfiguration config;
+  std::ifstream   configInput;
+  
+  configInput.open(path);
+  google::protobuf::io::IstreamInputStream pConfigInput(&configInput);
+  
+  bool parseSuccess = google::protobuf::TextFormat::Parse(&pConfigInput,
+							  &config);
+
+  if (parseSuccess) {
+    *output = config;
+    return 0;
+  } else {
+    return -1;
+  }
 }
