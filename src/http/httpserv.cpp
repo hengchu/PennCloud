@@ -30,6 +30,7 @@
 #include <map>
 #include <algorithm>
 #include <string>
+#include <kvapi.h>
 
 
 
@@ -189,7 +190,7 @@ void handle_command(std::string rawstring, int sock){
 			}
 
 
-			if(words[0].compare("GET") == 0){
+			else if(words[0].compare("GET") == 0){
 				_fget = true;
 				printf("WE HAVE A GET!  %s  %s\n",words[1].data(),words[2].data());
 				//we have a get command
@@ -350,6 +351,26 @@ void handle_command(std::string rawstring, int sock){
 			printf("NO POST STRING FOUND!\n");
 			return;
 		}
+
+		KVSession kvs ("127.0.0.1",3500);
+		if(kvs.connect() != 0){
+			perror("KVS FAIL!\n");
+
+		}
+
+		kvservice::KVServiceRequest req;
+
+		kvservice::GetRequest *getrq = req.mutable_get();
+
+		getrq -> set_column("test1");
+		getrq -> set_row("test2");
+		kvservice::KVServiceResponse kvresp;
+		if(kvs.request(&kvresp, req) != 0){
+			perror("REQUEST FAIL!\n");
+		}
+
+		std::cout << kvresp.DebugString() << std::endl;
+
 
 	}
 
@@ -519,6 +540,32 @@ int main(int argc, char* argv[]){
 		  strcpy(rootdir,argv[a+1]);
 	  }
   }
+
+
+
+
+	KVSession kvs ("127.0.0.1",3500);
+	if(kvs.connect() != 0){
+		perror("KVS FAIL!\n");
+
+	}
+
+	kvservice::KVServiceRequest req;
+
+	kvservice::GetRequest *getrq = req.mutable_get();
+
+	getrq -> set_column("test1");
+	getrq -> set_row("test2");
+	kvservice::KVServiceResponse kvresp;
+	if(kvs.request(&kvresp, req) != 0){
+		perror("REQUEST FAIL!\n");
+	}
+
+	std::cout << kvresp.DebugString() << std::endl;
+
+
+
+
 
 
 
