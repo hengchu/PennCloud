@@ -142,7 +142,7 @@ struct echo_data {
 	int comm_fd;
 };
 
-bool delete_email(string user, int index) {
+WebmailResponseCode delete_email(string user, int index) {
 	int get_id = next_id();
 	int delete_id = next_id();
 	int server = 0;
@@ -164,20 +164,23 @@ bool delete_email(string user, int index) {
 
 			session.request(&response, kv_r);
 
-			switch (response.service_response_case()) {
-				case KVServiceResponse::ServiceResponseCase::kGet:
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
 					contents = response.get().value();
 					emails = parse_messages(contents);
 					break;
-				case KVServiceResponse::ServiceResponseCase::kFailure:
-					index++;
+				case ResponseCode::NO_SUCH_KEY:
+					return MISSING_USER;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					server++;
 					continue;
 			}
 		}
 
 		{
 			if (index < 0 || index > emails.size()) {
-				return false;
+				return INVALID_INDEX;
 			}
 			emails.erase(emails.begin() + index);
 			ComparePutRequest p;
@@ -191,19 +194,22 @@ bool delete_email(string user, int index) {
 			kv_p.set_allocated_compare_put(&p);
 			session.request(&response, kv_p);
 
-			switch (response.service_response_case()) {
-				case KVServiceResponse::ServiceResponseCase::kGet:
-					break;
-				case KVServiceResponse::ServiceResponseCase::kFailure:
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					return WebmailResponseCode::SUCCESS;
+				case ResponseCode::OLD_VALUE_DIFF:
+					return WebmailResponseCode::CONCURRENT_CHANGE;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
 					// Failure here could be either that the message was changed
 					// or that the RPC failed. Unfortunately it's hard to distinguish
 					// right now.
-					index++;
+					server++;
 					continue;
 			}
-
 		}
 	}
+	return WebmailResponseCode::FAILURE;
 }
 
 vector<Email> get_messages(string user) {
@@ -225,11 +231,12 @@ vector<Email> get_messages(string user) {
 
 		session.request(&response, kv_r);
 
-		switch (response.service_response_case()) {
-			case KVServiceResponse::ServiceResponseCase::kGet:
+		switch (response.response_code()) {
+			case ResponseCode::SUCCESS:
 				contents = response.get().value();
 				break;
-			case KVServiceResponse::ServiceResponseCase::kFailure:
+			case ResponseCode::FAILURE:
+			case ResponseCode::SERVICE_FAIL:
 				index++;
 				continue;
 		}
@@ -270,7 +277,7 @@ void* pop3(void* arg) {
 				
 					if (id < 0 || id > messages.size()) {
 						GenericResponse response;
-						wsr.set_response_code(WebmailResponseCode::FAILURE);
+						wsr.set_response_code(WebmailResponseCode::INVALID_INDEX);
 						wsr.set_allocated_generic(&response);
 					} else {
 						EmailResponse response;
@@ -280,7 +287,7 @@ void* pop3(void* arg) {
 						wsr.set_response_code(WebmailResponseCode::SUCCESS);
 						wsr.set_allocated_get(&response);
 					}
-					bool error = ProtoUtil::writeDelimitedTo(wsr, os);
+					ProtoUtil::writeDelimitedTo(wsr, os);
 
 					break;
 				}
@@ -297,7 +304,7 @@ void* pop3(void* arg) {
 					} else {
 						wsr.set_response_code(WebmailResponseCode::FAILURE);
 					}
-					bool error = ProtoUtil::writeDelimitedTo(wsr, os);
+					ProtoUtil::writeDelimitedTo(wsr, os);
 
 					break;
 				}
@@ -318,7 +325,7 @@ void* pop3(void* arg) {
 					resp.set_user(message.user());
 					resp.set_response_code(WebmailResponseCode::SUCCESS);
 					resp.set_allocated_m(&response);
-					bool error = ProtoUtil::writeDelimitedTo(resp, os);
+					ProtoUtil::writeDelimitedTo(resp, os);
 					break;
 				}
 		}

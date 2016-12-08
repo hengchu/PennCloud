@@ -33,8 +33,10 @@ message Email {
 
 enum WebmailResponseCode {
   SUCCESS = 0;
-  FAILURE = 1;
-  INVALID = 2;
+  MISSING_USER = 1;
+  CONCURRENT_CHANGE = 2;
+  INVALID_INDEX = 3;
+  FAILURE = 4;
 };
 
 message EmailResponse {

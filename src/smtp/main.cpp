@@ -78,6 +78,40 @@ struct echo_data {
 	int comm_fd;
 };
 
+bool user_exists(string to) {
+	int index = 0;
+	int id = next_id();
+
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			GetRequest g;
+			g.set_row(to);
+			g.set_column("mbox");
+
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(id);
+			kv_r.set_allocated_get(&g);
+		
+			session.request(&response, kv_r); 
+	
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					return true;
+				case ResponseCode::NO_SUCH_KEY:
+					return false;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;
+			}
+		}
+	}
+}
+
 void reply(int comm_fd, string str) {
 	dprintf(comm_fd, "%s", str.c_str());
 	SENT_COMMAND(comm_fd, str);
@@ -104,11 +138,17 @@ void write_message(string from, string to, string message) {
 		
 			session.request(&response, kv_r); 
 	
-			switch (response.service_response_case()) {
-				case KVServiceResponse::ServiceResponseCase::kGet:
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
 					contents = response.get().value();
 					break;
-				case KVServiceResponse::ServiceResponseCase::kFailure:
+				case ResponseCode::NO_SUCH_KEY:
+					// This shouldn't happen since we checked elsewhere
+					break;
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;
+				case ResponseCode::FAILURE:
 					index++;
 					continue;
 			}
@@ -132,12 +172,13 @@ void write_message(string from, string to, string message) {
 			session.request(&response, kv_p);
 
 			switch (response.service_response_case()) {
-				case KVServiceResponse::ServiceResponseCase::kGet:
+				case ResponseCode::SUCCESS:
 					break;
-				case KVServiceResponse::ServiceResponseCase::kFailure:
-					// Failure here could be either that the message was changed
-					// or that the RPC failed. Unfortunately it's hard to distinguish
-					// right now.
+				case ResponseCode::OLD_VALUE_DIFF:
+					// In this case we need to retry, but can use the same server.
+					continue;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
 					index++;
 					continue;
 			}
@@ -248,8 +289,12 @@ void* smtp(void* arg) {
 
 						// Need to do checking if user exists
 						if (domain == DOMAIN) {
-							to.insert(name);
-							reply(data->comm_fd, "250 OK\n");
+							if (!user_exists(name)) {
+								reply(data->comm_fd, "550 No such user\n");
+							} else {
+								to.insert(name);
+								reply(data->comm_fd, "250 OK\n");
+							}
 						} else {
 							reply(data->comm_fd, "553 forwarding not available\n");
 						}	
