@@ -113,19 +113,29 @@ void write_message(string from, string to, string message) {
 		}
 		
 		{
-			PutRequest p;
+			ComparePutRequest p;
 			p.set_row(to);
 			p.set_column("mbox");
-			p.set_value(contents + message);
+			p.set_old_value(contents);
+
+			auto now = std::chrono::system_clock::now();
+			std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+
+			stringstream new_value(contents);
+			new_value << "\nFrom " << to << std::ctime(&now_t) << "\n" << message;
+			p.set_new_value(new_value.str());
 			KVServiceRequest kv_p;
 			kv_p.set_request_id(next_id());
-			kv_p.set_allocated_put(&p);
+			kv_p.set_allocated_compare_put(&p);
 			session.request(&response, kv_p);
 
 			switch (response.service_response_case()) {
 				case KVServiceResponse::ServiceResponseCase::kGet:
 					break;
 				case KVServiceResponse::ServiceResponseCase::kFailure:
+					// Failure here could be either that the message was changed
+					// or that the RPC failed. Unfortunately it's hard to distinguish
+					// right now.
 					index++;
 					continue;
 			}
