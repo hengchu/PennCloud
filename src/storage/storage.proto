@@ -27,6 +27,11 @@ message DeleteRequest {
   string filename = 1;
 }
 
+message RenameRequest {
+  string original = 1;
+  string new = 2;
+}
+
 message StorageServiceRequest {
   int32 request_id = 1;
   string user = 2;
@@ -38,13 +43,17 @@ message StorageServiceRequest {
     GetDirectoryRequest gd = 6;
     GetFileRequest gf = 7;
     DeleteRequest d = 8;
+    RenameRequest r = 9;
   };
 };
 
 enum ResponseCode {
   SUCCESS = 0;
-  FAILURE = 1;
-  INVALID = 2;
+  MISSING_USER = 1;
+  MISSING_FILE = 2;
+  MISSING_DIRECTORY = 3;
+  FAILURE = 4;
+  CONCURRENT_MODIFY = 5;
 };
 
 message GenericResponse {
