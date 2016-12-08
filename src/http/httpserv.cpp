@@ -168,34 +168,14 @@ void handle_command(std::string rawstring, int sock){
 			if(words[0].compare("POST") == 0){
 				_fpost = true;
 				printf("WE HAVE A POST   %s   %s\n",words[1].data(),words[2].data());
-
-				// we have a post command
-
-				// check for valid version
-				// check HTTP/1.0 or 1.1
-				words[2] = trim_string(words[2]);
-				if(strncmp(words[2].data(),"HTTP/1.0",8)!=0 and strncmp(words[2].data(),"HTTP/1.1",8)!=0){
-
-					write(sock,http_v,strlen(http_v));
-					write(sock,badreq,strlen(badreq));
-					write(sock,crlf,2);
-					return;
-
-				}
-
-
-
-
-
+			}
+			else if(words[0].compare("GET")){
+				_fget = true;
+				printf("WE HAVE A POST   %s   %s\n",words[1].data(),words[2].data());
 			}
 
 
-			else if(words[0].compare("GET") == 0){
-				_fget = true;
-				printf("WE HAVE A GET!  %s  %s\n",words[1].data(),words[2].data());
-				//we have a get command
-
-
+			if(_fget or _fpost){
 				// check for valid version
 				// check HTTP/1.0 or 1.1
 				words[2] = trim_string(words[2]);
@@ -207,57 +187,11 @@ void handle_command(std::string rawstring, int sock){
 					return;
 
 				}
-
-				// check for /login or /register
-				words[1] = trim_string(words[1]);
-				if(words[1].compare("/login") == 0 or words[1].compare("/register") == 0){
-					// valid
-				}
-				else { // invalid POST command
-					write(sock,"BAD POST",8);
-
-					write(sock,crlf,2);
-					return;
-				}
-
-
-
-				// if the specified filepath is just / - default to index
-				words[1] = trim_string(words[1]);
-				if(words[1].compare("/") == 0){
-				// default request is /index.html
-					words[1] = "/index.html";
-				}
-				printf("FILE PATH: %s\n",words[1].data());
-				printf("CHECK1\n");
-				char path[10000];
-				printf("CHECK2\n");
-				//load up the requested file
-				// load up the path
-				strcpy(path,rootdir);
-
-				printf("strlen rootdir is %d\n",strlen(rootdir));
-				strcpy(&path[strlen(rootdir)],words[1].data());
-				// check if the file exists
-				printf("TRYING TO OPEN\n");
-				if((fd = open(path,O_RDONLY))!=1){
-					// file found
-					printf("OPENED FILE\n");
-
-
-				}else{//couldnt find it
-					// write filenotfound
-					write(sock,http_v,strlen(http_v));
-					write(sock,notfound,strlen(notfound));
-					write(sock,crlf,2);
-					return;
-				}
-			} else {
-				write(sock,"400 No Such Command",20);
-				write(sock,crlf,2);
-				return;
 			}
 		}
+
+
+
 
 		else if (words.size() > 0){//not the first line, still have stuff
 			std::string currhead("NULL");
@@ -321,55 +255,68 @@ void handle_command(std::string rawstring, int sock){
 	}
 	// if we had a GET:
 	if(_fget){
-		// write headers
+		// try to get file
 
-		// write server header
+		// if not possible, return file not found
 
-		write(sock,http_v,strlen(http_v));
-		write(sock,ok,strlen(ok));
-		write(sock,crlf,2);
+		// else write headers
 
-		// write cookie
-		write(sock,ccook.data(),strlen(ccook.data()));
-
-		// write file
-		int bread;
-		char sendbuf[BUFMAX];
-		while((bread=read(fd,sendbuf,BUFMAX))>0){
-			write(sock,sendbuf,bread);
-		}
-		close(fd);
-		write(sock,crlf,2);
-		return;
+		//write files
 	}
 	else if(_fpost){
-		char pm[100000];
+
+		// read one more line
+
+
+		bool eol = false;
+		char pm[100000], e_pm[100000];
+		std::string pm_s;
 		memset(pm,10000,0);
 		// need to read in one more line
-		int pr = recv(sock,pm,100000,0);
-		if(pr <=0 ){
-			printf("NO POST STRING FOUND!\n");
-			return;
+		while(!eol){
+			int pr = recv(sock,pm,100000,0);
+			if(pr <=0 ){
+				printf("NO POST STRING FOUND!\n");
+				return;
+			}
+			for(int k=0;k<pr;k++){}
 		}
 
-		KVSession kvs ("127.0.0.1",3500);
-		if(kvs.connect() != 0){
-			perror("KVS FAIL!\n");
 
-		}
 
-		kvservice::KVServiceRequest req;
 
-		kvservice::GetRequest *getrq = req.mutable_get();
 
-		getrq -> set_column("test1");
-		getrq -> set_row("test2");
-		kvservice::KVServiceResponse kvresp;
-		if(kvs.request(&kvresp, req) != 0){
-			perror("REQUEST FAIL!\n");
-		}
 
-		std::cout << kvresp.DebugString() << std::endl;
+
+
+
+
+
+
+
+
+
+
+
+
+//		KVSession kvs ("127.0.0.1",3500);
+//		if(kvs.connect() != 0){
+//			perror("KVS FAIL!\n");
+//
+//		}
+//
+//		kvservice::KVServiceRequest req;
+//
+//		kvservice::GetRequest *getrq = req.mutable_get();
+//
+//		getrq -> set_column("test1");
+//		getrq -> set_row("test2");
+//		kvservice::KVServiceResponse kvresp;
+//		if(kvs.request(&kvresp, req) != 0){
+//			perror("REQUEST FAIL!\n");
+//		}
+//
+//		std::cout << kvresp.DebugString() << std::endl;
 
 
 	}
@@ -458,7 +405,7 @@ void *handle_connection(void *s){
 
 				  e_msg[counter] = c;
 				  counter++;
-				  printf("we have %s\n",e_msg);
+				  //printf("we have %s\n",e_msg);
 				  // check if we got a blank line (\r\n\r\n or \n\n)
 				  if(counter >= 2){// client is sending \n\n
 					  if(e_msg[counter] == '\n' and (e_msg[counter-1] == '\n')){
@@ -466,7 +413,7 @@ void *handle_connection(void *s){
 					  }
 				  }
 				  if(counter >=4 and !term){// client is sending \r\n\r\n
-					  printf("last 4 are: %d %d %d %d \n",(int)e_msg[counter-3],(int)e_msg[counter-2],(int)e_msg[counter-1],(int)e_msg[counter]);
+					  //printf("last 4 are: %d %d %d %d \n",(int)e_msg[counter-3],(int)e_msg[counter-2],(int)e_msg[counter-1],(int)e_msg[counter]);
 					  if((int)e_msg[counter] == 0 and (int)e_msg[counter-1] == 10 and (int)e_msg[counter-2] == 13 and (int)e_msg[counter-3] == 10){
 						  term = true;
 						  printf("FOUND EOM\n");
@@ -544,24 +491,24 @@ int main(int argc, char* argv[]){
 
 
 
-	KVSession kvs ("127.0.0.1",3500);
-	if(kvs.connect() != 0){
-		perror("KVS FAIL!\n");
-
-	}
-
-	kvservice::KVServiceRequest req;
-
-	kvservice::GetRequest *getrq = req.mutable_get();
-
-	getrq -> set_column("test1");
-	getrq -> set_row("test2");
-	kvservice::KVServiceResponse kvresp;
-	if(kvs.request(&kvresp, req) != 0){
-		perror("REQUEST FAIL!\n");
-	}
-
-	std::cout << kvresp.DebugString() << std::endl;
+//	KVSession kvs ("127.0.0.1",3500);
+//	if(kvs.connect() != 0){
+//		perror("KVS FAIL!\n");
+//
+//	}
+//
+//	kvservice::KVServiceRequest req;
+//
+//	kvservice::GetRequest *getrq = req.mutable_get();
+//
+//	getrq -> set_column("test1");
+//	getrq -> set_row("test2");
+//	kvservice::KVServiceResponse kvresp;
+//	if(kvs.request(&kvresp, req) != 0){
+//		perror("REQUEST FAIL!\n");
+//	}
+//
+//	std::cout << kvresp.DebugString() << std::endl;
 
 
 
