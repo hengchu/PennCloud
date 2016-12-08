@@ -62,43 +62,64 @@ const char* badreq = "400 Bad Request";
 const char* crlf = "\r\n";
 
 
-unsigned int split_string(const std::string &raw, std::vector<std::string> &strs, char c)
-{
-    unsigned int pos = raw.find( c );
-    unsigned int init = 0;
-    strs.clear();
-
-    // split raw text at delimiter
-    while( pos != std::string::npos ) {
-        strs.push_back( raw.substr( init, pos - init + 1 ) );
-        init = pos + 1;
-
-        pos = raw.find( c, init );
-    }
-
-    // Add the last one
-    strs.push_back( raw.substr( init, std::min( (int)pos, (int)raw.size() ) - init + 1 ) );
-
-	// returns number of strings
-    return strs.size();
-}
-
-
 
 
 
 // an auxiliary function to trim whitespace at the start and end of a string
 std::string trim_string(std::string line){
+	printf("CALLED TRIM\n");
+
+	if(line.size() == 0){return line;}
 
 	while(line.at(0) == ' ' or line.at(0) == '\t' or line.at(0) == '\r' or line.at(0) == '\n'){
+
 		line.erase(0,1);
+		if(line.size() == 0){return line;}
 	}
+	printf("DID FRONT\n");
 	while(line.back() == ' ' or line.back() == '\t' or line.back() == '\r' or line.back() == '\n'){
 		line.erase(line.size()-1);
+		if(line.size() == 0){return line;}
 	}
-
+	printf("DID BACK\n");
+	printf("FINISHED TRIM\n");
 	return line;
 }
+
+
+
+
+std::vector<std::string> split_string(const std::string& str, const std::string& delim)
+{
+	printf("INVOKED SPLIT\n");
+    std::vector<std::string> tokens;
+    size_t prev = 0, pos = 0;
+
+    std::string teststr = trim_string(str);
+    printf("TESTSTR SIZE IS %u\n",teststr.size());
+    if(teststr.size() == 0){printf("RETURNING EMPTY VECTOR!\n"); return tokens;}
+
+    do
+    {
+    	printf("SPLIT DO START\n");
+        pos = str.find(delim, prev);
+        if (pos == std::string::npos) pos = str.length();
+        std::string token = str.substr(prev, pos-prev);
+        if (!token.empty()) tokens.push_back(token);
+        prev = pos + delim.length();
+        printf("SPLIT DO END\n");
+    }
+
+    while (pos < str.length() && prev < str.length());
+
+    return tokens;
+}
+
+
+
+
+
+
 
 
 
@@ -107,14 +128,22 @@ void handle_command(std::string rawstring, int sock){
 
 
 	std::vector<std::string> lines;
-	unsigned int numlines = split_string(rawstring,lines,'\n');
+
+	printf("I got characters:");
+	for(int j=0;j<rawstring.length();j++){
+		printf(" %d",(int)rawstring[j]);
+	}
+
+	lines = split_string(rawstring,"\n");
+	unsigned int numlines = lines.size();
+	printf("numlines %ud \n",numlines);
 	std::string output = "";
 
 
 	std::string lasthead = "NULL";
 
 	// parse through each line
-	std::vector<std::string> words, ua, cook;
+	std::vector<std::string> ua, cook;
 	unsigned int numwords;
 
 	bool hascookie = false;
@@ -122,16 +151,20 @@ void handle_command(std::string rawstring, int sock){
 	int fd;
 
 	for(int i=0;i<numlines;i++){
-		// trim the line
+		printf("%s\n",lines[i].data());
+		printf("looping %d\n",i);
 
-		numwords = split_string(lines[i],words,' ');
+		std::vector<std::string> words = split_string(lines[i]," ");
+		printf("SPLIT WORKED!\n");
 
 		// if this is the first line:
 		if(i == 0){
 			// check if we start with a command
 			words[0] = trim_string(words[0]);
+			printf("words 0\n");
+			printf(words[0].data());
 			if(words[0].compare("GET") == 0){
-
+				printf("WE HAVE A GET!    %s    %s\n",words[1].data(),words[2].data());
 				//we have a get command
 
 
@@ -139,6 +172,7 @@ void handle_command(std::string rawstring, int sock){
 				// check HTTP/1.0 or 1.1
 				words[2] = trim_string(words[2]);
 				if(strncmp(words[2].data(),"HTTP/1.0",8)!=0 and strncmp(words[2].data(),"HTTP/1.1",8)!=0){
+
 					write(sock,http_v,strlen(http_v));
 					write(sock,badreq,strlen(badreq));
 					write(sock,crlf,2);
@@ -154,16 +188,21 @@ void handle_command(std::string rawstring, int sock){
 				// default request is /index.html
 					words[1] = "/index.html";
 				}
-
-				char* path;
+				printf("FILE PATH: %s\n",words[1].data());
+				printf("CHECK1\n");
+				char path[10000];
+				printf("CHECK2\n");
 				//load up the requested file
 				// load up the path
 				strcpy(path,rootdir);
+
+				printf("strlen rootdir is %d\n",strlen(rootdir));
 				strcpy(&path[strlen(rootdir)],words[1].data());
 				// check if the file exists
+				printf("TRYING TO OPEN\n");
 				if((fd = open(path,O_RDONLY))!=1){
 					// file found
-					continue;
+					printf("OPENED FILE\n");
 
 
 				}else{//couldnt find it
@@ -173,15 +212,25 @@ void handle_command(std::string rawstring, int sock){
 					write(sock,crlf,2);
 					return;
 				}
+			} else {
+				write(sock,"400 No Such Command",20);
+				write(sock,crlf,2);
+				return;
 			}
 		}
 
-		else{//not the first line
+		else if (words.size() > 0){//not the first line, still have stuff
 			std::string currhead("NULL");
 			// check if we are continuing a previous header
+
 			if(words[0] == " " and lasthead != "NULL"){
 				//part of last header
 				currhead = lasthead;
+			}
+
+			else if(words[0] == "\r"){
+				bool term = true;
+				break;
 			}
 			else{
 				std::transform(words[0].begin(), words[0].end(), words[0].begin(), ::tolower);
@@ -248,7 +297,9 @@ void handle_command(std::string rawstring, int sock){
 	while((bread=read(fd,sendbuf,BUFMAX))>0){
 		write(sock,sendbuf,bread);
 	}
+	close(fd);
 	write(sock,crlf,2);
+	return;
 
 
 }
@@ -279,6 +330,8 @@ void serv_init(char *port){
   //bind the socket
   for(p = r; p!=NULL; p=p->ai_next){
     sockfd = socket(p->ai_family,p->ai_socktype,0);
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0)
+        error("setsockopt(SO_REUSEADDR) failed");
     if(sockfd == -1){continue;}
 
     if(bind(sockfd,p->ai_addr, p->ai_addrlen) == 0){
@@ -303,52 +356,63 @@ void serv_init(char *port){
 
 
 // handle connection
-void *handle_connection(void *cidx){
-  int idx = *(int*)cidx;
+void *handle_connection(void *s){
+  int sock = *(int*)s;
 
   std::string s_msg;
 
   char msg[100000], e_msg[100000], c;
   int rec,bread,fd,counter=0;
 
-
+  memset((void*)msg,0,100000);
+  memset((void*)e_msg,0,100000);
 
 	while(true){
 		bool term = false;
-
 	  // clear the message buffer
-	  memset((void*)msg,0,100000);
-	  memset((void*)e_msg,0,100000);
+
 
 	// read from socket
-	  rec = recv(clients[idx],msg,100000,0);
+	  rec = recv(sock,msg,100000,0);
 	  if(rec>0){
 		  // char by char
 		  for(int i=0;i<rec;i++){
+
 			  c = msg[i];
-			  e_msg[counter] = c;
+			  if(c!=0){
 
-			  // check if we got a blank line (\r\n\r\n or \n\n)
-			  if(counter >= 2){// client is sending \n\n
-				  if(e_msg[counter] == '\n' and (e_msg[counter-1] == '\n')){
-					  term = true;
+				  e_msg[counter] = c;
+				  counter++;
+				  printf("we have %s\n",e_msg);
+				  // check if we got a blank line (\r\n\r\n or \n\n)
+				  if(counter >= 2){// client is sending \n\n
+					  if(e_msg[counter] == '\n' and (e_msg[counter-1] == '\n')){
+						  term = true;
+					  }
 				  }
-			  }
-			  if(counter >=4 and !term){// client is sending \r\n\r\n
-				  if(e_msg[counter] == '\n' and e_msg[counter-1] == '\r' and e_msg[counter-2] == '\n' and e_msg[counter-3] == '\r'){
-					  term = true;
+				  if(counter >=4 and !term){// client is sending \r\n\r\n
+					  printf("last 4 are: %d %d %d %d \n",(int)e_msg[counter-3],(int)e_msg[counter-2],(int)e_msg[counter-1],(int)e_msg[counter]);
+					  if((int)e_msg[counter] == 0 and (int)e_msg[counter-1] == 10 and (int)e_msg[counter-2] == 13 and (int)e_msg[counter-3] == 10){
+						  term = true;
+						  printf("FOUND EOM\n");
+						  printf("HERE EMSG IS %s\n starts: %c\n",e_msg, e_msg[0]);
+					  }
 				  }
-			  }
-			  counter++;
 
-			  // if we've found the end of a message
-			  if(term){
-				  // dump it into a string and handle it
-				  term = false;
-				  s_msg.assign(e_msg);
-				  i = rec;
 
-				  handle_command(s_msg,clients[idx]);
+				  // if we've found the end of a message
+				  if(term){
+					  // dump it into a string and handle it
+					  term = false;
+					  s_msg = std::string(e_msg);
+					  i = rec;
+					  printf("DISPATCHING!\n e_msg is: %s\n",e_msg);
+					  counter = 0;
+
+					  handle_command(s_msg,sock);
+					  memset((void*)msg,0,100000);
+					  memset((void*)e_msg,0,100000);
+				  }
 			  }
 		  }
 
@@ -358,8 +422,8 @@ void *handle_connection(void *cidx){
 	  }
 	}
 
-	close(clients[idx]);
-	clients[idx] = -1;
+	close(sock);
+
 
 	return 0;
 }
@@ -394,9 +458,9 @@ int main(int argc, char* argv[]){
 
   //parse command line args
   for(int a=1; a<argc;a++){
-	  if(argv[a] == "-v"){verbose = true;}
-	  if(argv[a] == "-p"){strcpy(PORTNO,argv[a+1]);}
-	  if(argv[a] == "-r"){
+	  if(strcmp(argv[a],"-v") == 0){verbose = true;}
+	  if(strcmp(argv[a],"-p") == 0){strcpy(PORTNO,argv[a+1]);}
+	  if(strcmp(argv[a],"-r") == 0){
 		  bzero(rootdir, strlen(argv[a+1]));
 		  strcpy(rootdir,argv[a+1]);
 	  }
