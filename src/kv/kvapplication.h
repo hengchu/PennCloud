@@ -77,9 +77,17 @@ class KVApplication : public KVLogManager {
   std::mutex                       d_clientsLock;
   // The lock to protect the clients map.
 
+  std::mutex                       d_logsLock;
+  // A lock to protect the log entries.
+  
   std::vector<LogEntry>            d_logs;
   // The requests this server has processed.
 
+  std::vector<kvservice::KVServiceResponse>
+                                   d_logResponses;
+  // An item at index i corresponds to the response generated for
+  // applying log entry[i].
+  
   int                              d_persistedLogIndex;
   // Index of the last log entry that was persistend to the file.
   
@@ -91,9 +99,6 @@ class KVApplication : public KVLogManager {
                                    d_persistentLogsOutputStream_up;
   // The protobuf stream associated with d_persistentLogs and used for
   // output.
-
-  std::mutex                       d_logsLock;
-  // A lock to protect the log entries.
   
   void listenForClients();
   // Listen for incoming client connections.

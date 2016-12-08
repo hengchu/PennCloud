@@ -114,6 +114,8 @@ KVSession::request(KVServiceResponse       *response,
   if (!success) {
     LOG_ERROR << "Failed to read from server."
 	      << LOG_END;
+    response->set_response_code(ResponseCode::SERVICE_FAIL);
+    response->mutable_failure()->set_error_message("Service down. Please retry again.");
     return -1;
   }
   

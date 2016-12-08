@@ -50,9 +50,12 @@ message KVServiceRequest {
 //     Response Types
 // ----------------------
 enum ResponseCode {
-  SUCCESS = 0; // The request was processed successfully.
-  FAILURE = 1; // The request failed.
-  INVALID = 2; // The request was invalid.
+  SUCCESS        = 0; // The request was processed successfully.
+  FAILURE        = 1; // The request failed.
+  OLD_VALUE_DIFF = 2; // The old value was different for a CNP request.
+  NO_SUCH_KEY    = 3; // There was no such pair of (col, row) key.
+  SERVICE_FAIL   = 4; // The service crashed or was brought down. Try another server.
+  INVALID        = 5; // The request was invalid.  
 };
 
 message GetResponse {

@@ -268,19 +268,10 @@ KVApplication::handleClientRequest(int                     clientId,
 	       << LOG_END;
 
       KVServiceResponse resp;
-      resp.set_response_code(ResponseCode::SUCCESS);
-      if (request.service_request_case() == KVServiceRequest::kGet) {
-	std::string value;
-	int rc = d_storage.get(&value,
-			       request.get().column(),
-			       request.get().row());
 
-	if (0 != rc) {
-	  resp.set_response_code(ResponseCode::FAILURE);
-	  resp.mutable_failure()->set_error_message("No value such column and row.");
-	} else {
-	  resp.mutable_get()->set_value(value);
-	}
+      {
+	std::lock_guard<std::mutex> guard(d_logsLock);
+	resp = d_logResponses[logIndex];
       }
 
       sendResponseToClient(clientId,
@@ -450,39 +441,74 @@ KVApplication::applyLog(int index)
       d_persistentLogsOutputStream_up->Flush();
       d_persistedLogIndex = index;
     }
+    
+    KVServiceResponse response;
+    const KVServiceRequest& request = log.d_request;
+  
+    switch(request.service_request_case()) {
+    case KVServiceRequest::kPut: {
+      // Do put.
+      d_storage.put(request.put().column(),
+		    request.put().row(),
+		    request.put().value());
+      response.set_response_code(ResponseCode::SUCCESS);
+    } break;
+    case KVServiceRequest::kGet: {
+      // Do get.
+      std::string data;
+      int rc = d_storage.get(&data,
+			     request.get().column(),
+			     request.get().row());
+      if (0 != rc) {
+	response.set_response_code(ResponseCode::NO_SUCH_KEY);
+	response.mutable_failure()->set_error_message("No such column and row.");
+      } else {
+	response.mutable_get()->set_value(data);
+	response.set_response_code(ResponseCode::SUCCESS);
+      }
+    } break;
+    case KVServiceRequest::kComparePut: {
+      // Do CNP.
+      int rc = d_storage.compareAndPut(request.compare_put().column(),
+				       request.compare_put().row(),
+				       request.compare_put().old_value(),
+				       request.compare_put().new_value());
+      if (0 == rc) {
+	response.set_response_code(ResponseCode::SUCCESS);
+      } else if (-1 == rc) {
+	response.set_response_code(ResponseCode::NO_SUCH_KEY);
+	response.mutable_failure()->set_error_message("No such column and row.");
+      } else if (-2 == rc) {
+	response.set_response_code(ResponseCode::OLD_VALUE_DIFF);
+	response.mutable_failure()->set_error_message("Old value was different.");
+      } else {
+	LOG_ERROR << "compareAndPut() returned unexpected error code = "
+		  << rc
+		  << LOG_END;
+	assert(false);
+      }
+    } break;
+    case KVServiceRequest::kDelete: {
+      // Do delete.
+      int rc = d_storage.deleteValue(request.delete_().column(),
+				     request.delete_().row());
+      if (0 == rc) {
+	response.set_response_code(ResponseCode::SUCCESS);
+      } else {
+	response.set_response_code(ResponseCode::NO_SUCH_KEY);
+	response.mutable_failure()->set_error_message("No such column and row.");
+      }
+    } break;
+    default:
+      // Invalid request.
+      LOG_ERROR << "Invalid log entry = "
+		<< ProtoUtil::truncatedDebugString(request)
+		<< LOG_END;
+    }
+
+    d_logResponses.push_back(response);
   }
   // UNLOCK
-
-  const KVServiceRequest& request = log.d_request;
-  
-  switch(request.service_request_case()) {
-  case KVServiceRequest::kPut: {
-    // Do put.
-    d_storage.put(request.put().column(),
-		  request.put().row(),
-		  request.put().value());
-  } break;
-  case KVServiceRequest::kGet: {
-    // Don't actually need to do anything.
-  } break;
-  case KVServiceRequest::kComparePut: {
-    // Do CNP.
-    d_storage.compareAndPut(request.compare_put().column(),
-			    request.compare_put().row(),
-			    request.compare_put().old_value(),
-			    request.compare_put().new_value());
-  } break;
-  case KVServiceRequest::kDelete: {
-    // Do delete.
-    d_storage.deleteValue(request.delete_().column(),
-			  request.delete_().row());
-  } break;
-  default:
-    // Invalid request.
-    LOG_ERROR << "Invalid log entry = "
-	      << ProtoUtil::truncatedDebugString(request)
-	      << LOG_END;
-  }
 }
 
 void
