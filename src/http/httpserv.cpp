@@ -64,7 +64,6 @@ const char* crlf = "\r\n";
 
 
 
-
 // an auxiliary function to trim whitespace at the start and end of a string
 std::string trim_string(std::string line){
 	printf("CALLED TRIM\n");
@@ -147,6 +146,7 @@ void handle_command(std::string rawstring, int sock){
 	unsigned int numwords;
 
 	bool hascookie = false;
+	bool _fget = false , _fpost = false;
 
 	int fd;
 
@@ -163,8 +163,35 @@ void handle_command(std::string rawstring, int sock){
 			words[0] = trim_string(words[0]);
 			printf("words 0\n");
 			printf(words[0].data());
+
+			if(words[0].compare("POST") == 0){
+				_fpost = true;
+				printf("WE HAVE A POST   %s   %s\n",words[1].data(),words[2].data());
+
+				// we have a post command
+
+				// check for valid version
+				// check HTTP/1.0 or 1.1
+				words[2] = trim_string(words[2]);
+				if(strncmp(words[2].data(),"HTTP/1.0",8)!=0 and strncmp(words[2].data(),"HTTP/1.1",8)!=0){
+
+					write(sock,http_v,strlen(http_v));
+					write(sock,badreq,strlen(badreq));
+					write(sock,crlf,2);
+					return;
+
+				}
+
+
+
+
+
+			}
+
+
 			if(words[0].compare("GET") == 0){
-				printf("WE HAVE A GET!    %s    %s\n",words[1].data(),words[2].data());
+				_fget = true;
+				printf("WE HAVE A GET!  %s  %s\n",words[1].data(),words[2].data());
 				//we have a get command
 
 
@@ -178,6 +205,18 @@ void handle_command(std::string rawstring, int sock){
 					write(sock,crlf,2);
 					return;
 
+				}
+
+				// check for /login or /register
+				words[1] = trim_string(words[1]);
+				if(words[1].compare("/login") == 0 or words[1].compare("/register") == 0){
+					// valid
+				}
+				else { // invalid POST command
+					write(sock,"BAD POST",8);
+
+					write(sock,crlf,2);
+					return;
 				}
 
 
@@ -279,27 +318,41 @@ void handle_command(std::string rawstring, int sock){
 
 		// add cookie to map
 	}
+	// if we had a GET:
+	if(_fget){
+		// write headers
 
-	// write headers
+		// write server header
 
-	// write server header
+		write(sock,http_v,strlen(http_v));
+		write(sock,ok,strlen(ok));
+		write(sock,crlf,2);
 
-	write(sock,http_v,strlen(http_v));
-	write(sock,ok,strlen(ok));
-	write(sock,crlf,2);
+		// write cookie
+		write(sock,ccook.data(),strlen(ccook.data()));
 
-	// write cookie
-	write(sock,ccook.data(),strlen(ccook.data()));
-
-	// write file
-	int bread;
-	char sendbuf[BUFMAX];
-	while((bread=read(fd,sendbuf,BUFMAX))>0){
-		write(sock,sendbuf,bread);
+		// write file
+		int bread;
+		char sendbuf[BUFMAX];
+		while((bread=read(fd,sendbuf,BUFMAX))>0){
+			write(sock,sendbuf,bread);
+		}
+		close(fd);
+		write(sock,crlf,2);
+		return;
 	}
-	close(fd);
-	write(sock,crlf,2);
-	return;
+	else if(_fpost){
+		char pm[100000];
+		memset(pm,10000,0);
+		// need to read in one more line
+		int pr = recv(sock,pm,100000,0);
+		if(pr <=0 ){
+			printf("NO POST STRING FOUND!\n");
+			return;
+		}
+
+	}
+
 
 
 }
@@ -328,10 +381,11 @@ void serv_init(char *port){
   }
 
   //bind the socket
+  int fl =1;
   for(p = r; p!=NULL; p=p->ai_next){
     sockfd = socket(p->ai_family,p->ai_socktype,0);
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0)
-        error("setsockopt(SO_REUSEADDR) failed");
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &fl, sizeof(int)) < 0)
+        perror("setsockopt(SO_REUSEADDR) failed");
     if(sockfd == -1){continue;}
 
     if(bind(sockfd,p->ai_addr, p->ai_addrlen) == 0){
