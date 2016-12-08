@@ -85,6 +85,8 @@ void reply(int comm_fd, string str) {
 
 void write_message(string from, string to, string message) {
 	int index = 0;
+	int get_id = next_id();
+	int put_id = next_id();
 
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
@@ -97,7 +99,7 @@ void write_message(string from, string to, string message) {
 			g.set_row(to);
 			g.set_column("mbox");
 			KVServiceRequest kv_r;
-			kv_r.set_request_id(next_id());
+			kv_r.set_request_id(get_id);
 			kv_r.set_allocated_get(&g);
 		
 			session.request(&response, kv_r); 
@@ -125,7 +127,7 @@ void write_message(string from, string to, string message) {
 			new_value << "\nFrom " << to << std::ctime(&now_t) << "\n" << message;
 			p.set_new_value(new_value.str());
 			KVServiceRequest kv_p;
-			kv_p.set_request_id(next_id());
+			kv_p.set_request_id(put_id);
 			kv_p.set_allocated_compare_put(&p);
 			session.request(&response, kv_p);
 
