@@ -47,7 +47,7 @@ message StorageServiceRequest {
   };
 };
 
-enum ResponseCode {
+enum StorageResponseCode {
   SUCCESS = 0;
   MISSING_USER = 1;
   MISSING_FILE = 2;
@@ -75,7 +75,7 @@ message StorageServiceResponse {
   int32 request_id = 1;
   string user = 2;
   
-  ResponseCode response_code = 3;
+  StorageResponseCode response_code = 3;
   oneof service_response {
     GenericResponse g = 4;
     GetDirectoryResponse p = 5;
