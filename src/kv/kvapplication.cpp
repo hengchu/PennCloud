@@ -444,6 +444,7 @@ KVApplication::applyLog(int index)
     
     KVServiceResponse response;
     const KVServiceRequest& request = log.d_request;
+    response.set_request_id(request.request_id());
   
     switch(request.service_request_case()) {
     case KVServiceRequest::kPut: {
