@@ -66,17 +66,82 @@ void remove_thread(int thread_id, int connection_id) {
 	connections.erase(connection_id);
 }
 
-bool file_exists(string name) {
-	if (verbose) cerr << "Checking existence of " << name << "\n";
-	ifstream f(name.c_str());
-	return f.good();
-}
-
 // comm_fd is the socket thread should use.
 struct echo_data {
 	int thread_id;
 	int comm_fd;
 };
+
+int get_id(string to) {
+	int index = 0;
+	int request_id = next_id();
+	int compare_id = next_id();
+
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		int id;
+
+		if (session.connect() != 0) {
+			return -1;
+		}
+		KVServiceResponse response;
+		
+		{
+			KVServiceRequest kv_r;
+			GetRequest* g = kv_r.mutable_get();
+			g->set_row(to);
+			g->set_column("next_id");
+
+			kv_r.set_request_id(request_id);
+		
+			session.request(&response, kv_r); 
+	
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					id = stoi(response.get().value());
+					break;
+				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();	
+					return -1;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;
+			}
+		}
+
+		{
+			KVServiceRequest kv_p;
+			kv_p.set_request_id(compare_id);
+			ComparePutRequest* p = kv_p.mutable_compare_put();
+			p->set_row(to);
+			p->set_column("next_id");
+			p->set_old_value(to_string(id));
+			p->set_new_value(to_string(id + 1));
+
+			session.request(&response, kv_p);
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					return id;
+					break;
+				case ResponseCode::OLD_VALUE_DIFF:
+					// In this case we need to retry, but can use the same server.
+					session.disconnect();
+					continue;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+				case ResponseCode::INVALID:
+				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
+					index++;
+					continue;
+			}
+		}
+	}
+	return -1;
+}
 
 bool user_exists(string to) {
 	int index = 0;
@@ -85,29 +150,29 @@ bool user_exists(string to) {
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
+		if(session.connect() != 0) {
+			return false;
+		}
 		KVServiceResponse response;
-
-		{
-			GetRequest g;
-			g.set_row(to);
-			g.set_column("mbox");
-
-			KVServiceRequest kv_r;
-			kv_r.set_request_id(id);
-			kv_r.set_allocated_get(&g);
 		
-			session.request(&response, kv_r); 
+		KVServiceRequest kv_r;
+		GetRequest* g = kv_r.mutable_get();
+		g->set_row(to);
+		g->set_column("mbox");
+		kv_r.set_request_id(id);
+
+		session.request(&response, kv_r); 
 	
-			switch (response.response_code()) {
-				case ResponseCode::SUCCESS:
-					return true;
-				case ResponseCode::NO_SUCH_KEY:
-					return false;
-				case ResponseCode::FAILURE:
-				case ResponseCode::SERVICE_FAIL:
-					index++;
-					continue;
-			}
+		session.disconnect();
+		switch (response.response_code()) {
+			case ResponseCode::SUCCESS:
+				return true;
+			case ResponseCode::NO_SUCH_KEY:
+				return false;
+			case ResponseCode::FAILURE:
+			case ResponseCode::SERVICE_FAIL:
+				index++;
+				continue;
 		}
 	}
 }
@@ -117,7 +182,50 @@ void reply(int comm_fd, string str) {
 	SENT_COMMAND(comm_fd, str);
 }
 
-void write_message(string from, string to, string message) {
+// Bool represents whether we succeeded
+bool write_message(int id, string to, string message) {
+	int index = 0;
+	int put_id = next_id();
+
+	while (index < config.servers_size()) {
+			KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		if (session.connect() != 0) {
+			index++;
+			continue;
+		}
+		KVServiceResponse response;
+
+		
+		KVServiceRequest kv_r;
+		kv_r.set_request_id(put_id);
+		PutRequest* p = kv_r.mutable_put();
+		p->set_row(to);
+		p->set_column("mail" + to_string(id));
+		p->set_value(message);
+
+		session.request(&response, kv_r);
+		
+		session.disconnect();
+		switch(response.response_code()) {
+			case ResponseCode::SUCCESS:
+				return true;
+			
+			case ResponseCode::FAILURE:
+			case ResponseCode::SERVICE_FAIL:
+				index++;
+				continue;
+
+			case ResponseCode::INVALID:
+			case ResponseCode::NO_SUCH_KEY:
+			default:
+				return false;
+		}
+	}
+	return false;
+}
+
+bool update_mbox(int id, string from, string to) {
 	int index = 0;
 	int get_id = next_id();
 	int put_id = next_id();
@@ -125,17 +233,21 @@ void write_message(string from, string to, string message) {
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
+		if (session.connect() != 0) {
+			index++;
+			continue;
+		}
 		KVServiceResponse response;
 		string contents;
 
 		{
-			GetRequest g;
-			g.set_row(to);
-			g.set_column("mbox");
 			KVServiceRequest kv_r;
 			kv_r.set_request_id(get_id);
-			kv_r.set_allocated_get(&g);
-		
+			
+			GetRequest* g = kv_r.mutable_get();
+			g->set_row(to);
+			g->set_column("mbox");
+					
 			session.request(&response, kv_r); 
 	
 			switch (response.response_code()) {
@@ -144,36 +256,41 @@ void write_message(string from, string to, string message) {
 					break;
 				case ResponseCode::NO_SUCH_KEY:
 					// This shouldn't happen since we checked elsewhere
+					session.disconnect();
+					return false;
 					break;
 				case ResponseCode::SERVICE_FAIL:
+					session.disconnect();
 					index++;
 					continue;
 				case ResponseCode::FAILURE:
+					session.disconnect();
 					index++;
 					continue;
 			}
 		}
 		
 		{
-			ComparePutRequest p;
-			p.set_row(to);
-			p.set_column("mbox");
-			p.set_old_value(contents);
+			KVServiceRequest kv_p;
+			kv_p.set_request_id(put_id);
+
+			ComparePutRequest* p = kv_p.mutable_compare_put();
+			p->set_row(to);
+			p->set_column("mbox");
+			p->set_old_value(contents);
 
 			auto now = std::chrono::system_clock::now();
 			std::time_t now_t = std::chrono::system_clock::to_time_t(now);
 
-			stringstream new_value(contents);
-			new_value << "\nFrom " << to << std::ctime(&now_t) << "\n" << message;
-			p.set_new_value(new_value.str());
-			KVServiceRequest kv_p;
-			kv_p.set_request_id(put_id);
-			kv_p.set_allocated_compare_put(&p);
+			stringstream new_value("");
+			new_value << contents << id << "," << from << " " << std::ctime(&now_t);
+			p->set_new_value(new_value.str());
 			session.request(&response, kv_p);
 
-			switch (response.service_response_case()) {
+			session.disconnect();
+			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
-					break;
+					return true;
 				case ResponseCode::OLD_VALUE_DIFF:
 					// In this case we need to retry, but can use the same server.
 					continue;
@@ -181,9 +298,12 @@ void write_message(string from, string to, string message) {
 				case ResponseCode::SERVICE_FAIL:
 					index++;
 					continue;
+				default:
+					return false;
 			}
 		}
 	}
+	return false;
 }
 
 // This is the MAIN function for the thread.
@@ -227,14 +347,25 @@ void* smtp(void* arg) {
 
 				if (st == DATA) {
 					if (next == ".") {
-						for (auto i = to.begin(); i != to.end(); i++) {
-							write_message(from, *i, text);
+						bool had_error = false;
+						for (auto i = to.begin(); (!had_error) && i != to.end(); i++) {
+							int new_id = get_id(*i);
+							if (new_id >= 0) {
+								had_error = had_error || (!write_message(new_id, *i, text));
+								had_error = had_error || (!update_mbox(new_id, from, *i));
+							} else {
+								had_error = true;
+							}
 						}
 						from = "";
 						to.clear();
 						text = "";
 						st = FROM;
-						reply(data->comm_fd, "250 OK\n");
+						if (!had_error) {
+							reply(data->comm_fd, "250 OK\n");
+						} else {
+							reply(data->comm_fd, "450 failure\n");
+						}
 					} else {
 						text += next + "\n";
 						reply(data->comm_fd, "250 OK\n");
@@ -373,7 +504,7 @@ void server(bool verbose, int port) {
 int main(int argc, char *argv[])
 {
 	char o = 0;
-	int port = 2500;
+	int port = 8000;
 	while ((o = getopt(argc, argv, "avp:")) != -1) {
 		switch(o) {
 		case 'a':
