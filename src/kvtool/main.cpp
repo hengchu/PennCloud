@@ -140,12 +140,14 @@ int main(int argc, char *argv[])
 
   rc = session.disconnect();
 
-  if (response.response_code() != ResponseCode::SUCCESS) {
+  if (response.response_code() == ResponseCode::SUCCESS) {
+    if (mode == "get") {
+      std::cout << response.get().value() << std::endl;
+    }
+  } else {    
     std::cerr << "Request failed = "
-	      << response.failure().error_message()
+	      << response.DebugString()
 	      << std::endl;
-  } else if (mode == "get") {
-    std::cout << response.get().value() << std::endl;
   }
   
   return 0;
