@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <string>
 #include <kvapi.h>
+#include <ctime>
 
 
 
@@ -46,6 +47,8 @@ int BUFMAX = 4096;
 #define CRLF "\r\n"
 
 
+time_t cur_time;
+
 unsigned int cookie_gen = 111111;
 
 std::map<int, int> cookie_pairs;
@@ -53,6 +56,8 @@ std::map<int, int> cookie_pairs;
 char *rootdir;
 int sockfd;
 int clients[1024];
+
+
 
 std::vector<std::string> valid_headers = {"cookie:","user-agent:"};
 
@@ -107,11 +112,11 @@ std::vector<std::string> split_string(const std::string& str, const std::string&
         std::string token = str.substr(prev, pos-prev);
         if (!token.empty()) tokens.push_back(token);
         prev = pos + delim.length();
-        printf("SPLIT DO END\n");
+        printf("SPLIT DO END %s\n", token.data());
     }
 
     while (pos < str.length() && prev < str.length());
-
+    printf("SIZE OF TOKESN IS %d\n",tokens.size());
     return tokens;
 }
 
@@ -125,6 +130,19 @@ std::vector<std::string> split_string(const std::string& str, const std::string&
 
 // parses a string and performs the appropriate writes to the given socket
 void handle_command(std::string rawstring, int sock){
+	KVSession kvs ("127.0.0.1",3500);
+	if(kvs.connect() != 0){
+		perror("KVS FAIL!\n");
+
+	}
+	kvservice::KVServiceRequest req;
+	kvservice::KVServiceRequest req2;
+
+	kvservice::KVServiceResponse resp,resp2;
+
+	kvservice::GetRequest *getrq = req.mutable_get();
+
+	kvservice::PutRequest *putrq = req2.mutable_put();
 
 
 	std::vector<std::string> lines;
@@ -136,12 +154,12 @@ void handle_command(std::string rawstring, int sock){
 
 	lines = split_string(rawstring,"\n");
 	unsigned int numlines = lines.size();
-	printf("numlines %ud \n",numlines);
+	printf("numlines %u \n",numlines);
 	std::string output = "";
 
-
+	char* time_s;
 	std::string lasthead = "NULL";
-
+	std::string resource, contents;
 	// parse through each line
 	std::vector<std::string> ua, cook;
 	unsigned int numwords;
@@ -157,11 +175,12 @@ void handle_command(std::string rawstring, int sock){
 
 		std::vector<std::string> words = split_string(lines[i]," ");
 		printf("SPLIT WORKED!\n");
-
+		printf("WORDS 0 is %s\n",words[0].data());
 		// if this is the first line:
 		if(i == 0){
+			if(words.size() < 3){return;}
 			// check if we start with a command
-			words[0] = trim_string(words[0]);
+			//words[0] = trim_string(words[0]);
 			printf("words 0\n");
 			printf(words[0].data());
 
@@ -169,9 +188,9 @@ void handle_command(std::string rawstring, int sock){
 				_fpost = true;
 				printf("WE HAVE A POST   %s   %s\n",words[1].data(),words[2].data());
 			}
-			else if(words[0].compare("GET")){
+			else if(words[0].compare("GET") == 0){
 				_fget = true;
-				printf("WE HAVE A POST   %s   %s\n",words[1].data(),words[2].data());
+				printf("WE HAVE A GET   %s   %s\n",words[1].data(),words[2].data());
 			}
 
 
@@ -187,6 +206,12 @@ void handle_command(std::string rawstring, int sock){
 					return;
 
 				}
+
+				// load up the resource
+				resource = trim_string(words[1]);
+			}
+			else{return;
+
 			}
 		}
 
@@ -194,6 +219,8 @@ void handle_command(std::string rawstring, int sock){
 
 
 		else if (words.size() > 0){//not the first line, still have stuff
+
+			printf("ARE WE FAULTING IN HERE??\n");
 			std::string currhead("NULL");
 			// check if we are continuing a previous header
 
@@ -255,31 +282,122 @@ void handle_command(std::string rawstring, int sock){
 	}
 	// if we had a GET:
 	if(_fget){
-		// try to get file
+		// check if we are getting homepage:
+		if(resource.compare("/") == 0 or resource.compare("/index.html") == 0){
+			// get the index
 
-		// if not possible, return file not found
+
+			getrq -> set_column("common");
+			getrq -> set_row("index");
+			if(kvs.request(&resp, req) != 0){
+				perror("REQUEST FAIL!\n");
+			}
+
+			std::cout << resp.DebugString() << std::endl;
+
+
+		}
+		else{ // not looking for a common resource: lookup pair is (cookie, resource)
+
+			// lookup username from ("clist",cookie)
+			getrq -> set_column("clist");
+			getrq -> set_row(ccook);
+
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+
+
+
+			// check response codes:
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,http_v,strlen(http_v));
+					write(sock,"404 Not found or no permission",30);
+					write(sock,crlf,2);
+					return;
+			}
+
+
+			// if username not ""
+
+			// if resource is /mail/*
+			if(resource.substr(5) == "/mail"){
+				// send request to pop
+			}
+			else{
+				// get from kvs
+				// lookup username from ("clist",cookie)
+				getrq -> set_column(un);
+				getrq -> set_row(resource);
+
+				if(kvs.request(&resp,req) != 0){
+					perror("REQUEST FAIL! \n");
+				}
+				std::cout << resp.DebugString() << std::endl;
+
+
+
+
+				// check response codes:
+				switch (resp.service_response_case()) {
+					case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+						contents= resp.get().value();
+						break;
+					case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+						contents = "no permission";
+						write(sock,http_v,strlen(http_v));
+						write(sock,"404 Not found or no permission",30);
+						write(sock,crlf,2);
+						return;
+				}
+			}
+		}
+
 
 		// else write headers
 
-		//write files
-	}
-	else if(_fpost){
+		write(sock,http_v,strlen(http_v));
+		if(contents.compare(std::string(notfound)) == 0){
+			write(sock,notfound,strlen(notfound));
+			write(sock,crlf,2);
+			return;
+		}
+		else{
+			write(sock,ok,strlen(ok));
 
-		// read one more line
 
+			//time
+			time(&cur_time);
+			time_s = ctime(&cur_time);
+			write(sock,"Date: ",6);
+			write(sock,time_s,strlen(time_s));
 
-		bool eol = false;
-		char pm[100000], e_pm[100000];
-		std::string pm_s;
-		memset(pm,10000,0);
-		// need to read in one more line
-		while(!eol){
-			int pr = recv(sock,pm,100000,0);
-			if(pr <=0 ){
-				printf("NO POST STRING FOUND!\n");
-				return;
-			}
-			for(int k=0;k<pr;k++){}
+			//content type
+			write(sock,"content-type: ",14);
+			write(sock,"text/html",9);
+			write(sock,crlf,2);
+
+			// content length
+			int cl = (int)contents.length();
+			write(sock,"content-length: ",16);
+			write(sock,(char*)cl,strlen((char*)cl));
+			write(sock,crlf,2);
+
+			// blank line
+			write(sock,crlf,2);
+
+			// content
+			write(sock,contents.data(),strlen(contents.data()));
+			write(sock,crlf,2);
+
 		}
 
 
@@ -287,14 +405,65 @@ void handle_command(std::string rawstring, int sock){
 
 
 
+	}
+	else if(_fpost){
+		std::string post_data = "";
+		// read one more line
+		char buf;
+		bool eol;
+		while(!eol){
+			if(recv(sock,&buf,1,0)){
+				post_data = post_data + std::to_string(buf);
+			}
+			if(buf == '\n'){eol = true;}
+		}
+
+		// do something based on the resource:
+
+		// if login
+
+		// get check un/pw combo
+
+		std::vector<std::string> cred = split_string(post_data,"&");
+
+		std::vector<std::string> temp = split_string(cred[0],"=");
 
 
+		std::string un = temp[1];
 
+		temp = split_string(cred[1],"=");
 
+		std::string pw = temp[1];
 
+		// check if un+pw combo exists in kvs
 
+		getrq -> set_column(un);
+		getrq -> set_row(pw);
 
+		if(kvs.request(&resp,req) != 0){
+			perror("REQUEST FAIL! \n");
+		}
+		std::cout << resp.DebugString() << std::endl;
+		bool login = false;
+		switch (resp.service_response_case()) {
+			case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+				login = true;
 
+				// put cookie in table as ("clist",cookie) <- un
+
+				putrq -> set_row("clist");
+				putrq -> set_column(ccook);
+				putrq -> set_value(un);
+
+				if(kvs.request(&resp2,req2) !=0){
+					perror("REQUEST FAIL!\n");
+				}
+
+				break;
+			case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+				login = false;
+				break;
+		}
 
 
 
@@ -401,7 +570,8 @@ void *handle_connection(void *s){
 		  for(int i=0;i<rec;i++){
 
 			  c = msg[i];
-			  if(c!=0){
+			  if((int)c == 0){printf("NULL CHAR!\n");}
+			  if((int)c!=0){
 
 				  e_msg[counter] = c;
 				  counter++;
