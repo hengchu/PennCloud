@@ -27,8 +27,8 @@ message WebmailServiceRequest {
 };
 
 message Email {
-  string from = 1;
-  string email = 2;
+  int32 id = 1;
+  string from = 2;
 };
 
 enum WebmailResponseCode {

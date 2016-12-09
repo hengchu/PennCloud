@@ -12,6 +12,7 @@
 #include <vector>
 #include <set>
 #include <list>
+#include <map>
 #include <mutex>
 #include <csignal>
 #include <chrono>
@@ -66,65 +67,6 @@ void remove_thread(int thread_id, int connection_id) {
 	connections.erase(connection_id);
 }
 
-vector<Email> parse_messages(string mbox) {
-	vector<Email> messages;
-	stringstream i(mbox);
-	string next_line;
-	string from_line;
-	string next_message;
-
-	// Handle the first message.
-	do {
-		getline(i, next_line);
-	} while((next_line.length() < 5 || next_line.substr(0, 5) != "From ") && (!i.fail()));
-
-	if (!i.fail()) {
-		next_message = next_line + "\n";
-
-		do {
-			getline(i, next_line);
-			if (next_line.length() >= 5 && next_line.substr(0, 5) == "From ") {
-				Email m;
-				m.set_from(from_line);
-				m.set_email(next_message);
-				messages.push_back(m);
-				next_message = "";
-				from_line = next_line + "\n";
-			} else {
-				next_message += next_line + "\n";
-			}
-		} while (!i.fail());
-
-		Email m;
-		m.set_from(from_line);
-		m.set_email(next_message);
-		messages.push_back(m);
-	}
-	return messages;
-}
-
-string to_mbox(vector<Email> emails) {
-	stringstream ss("");
-	
-	for (auto i = emails.begin(); i != emails.end(); i++) {
-		ss << i->from() << "\n" << i->email() << "\n";	
-	}
-
-	return ss.str();
-}
-
-vector<string> get_arguments(string s) {
-	vector<string> l;
-	istringstream buffer(s);
-	string token;
-
-	while (getline(buffer, token, ' ')) {
-		l.push_back(token);
-	}
-
-	return l;
-}
-
 list<string> get_lines(string s) {
 	list<string> l;
 	istringstream buffer(s);
@@ -134,6 +76,34 @@ list<string> get_lines(string s) {
 		l.push_back(token);
 	}
 	return l;
+}
+
+map<int, Email> parse_messages(string mbox) {
+	map<int, Email> messages;
+	list<string> lines = get_lines(mbox);
+	
+	for (auto i = lines.begin(); i != lines.end(); i++) {
+		int comma = i->find(',');
+		if (comma == string::npos) {
+			continue;
+		}	
+		Email e;
+		int id = stoi(i->substr(0, comma));
+		e.set_id(id);
+		e.set_from(i->substr(comma + 1));
+		messages[id] = e;
+	}
+	return messages;
+}
+
+string to_mbox(map<int, Email> emails) {
+	stringstream ss("");
+	
+	for (auto i = emails.begin(); i != emails.end(); i++) {
+		ss << i->second.id() << "\n" << i->second.from() << "\n";	
+	}
+
+	return ss.str();
 }
 
 // comm_fd is the socket thread should use.
@@ -146,22 +116,26 @@ WebmailResponseCode delete_email(string user, int index) {
 	int get_id = next_id();
 	int delete_id = next_id();
 	int server = 0;
-	vector<Email> emails;
+	map<int, Email> emails;
 	string contents;
 
+	bool succeeded;
 	while (server < config.servers_size()) {
 		KVSession session(config.servers(server).client_addr().ip_address(),
 											config.servers(server).client_addr().port());
+		if (session.connect() != 0) {
+			server++;
+			continue;
+		}
 		KVServiceResponse response;
 
 		{
-			GetRequest g;
-			g.set_row(user);
-			g.set_column("mbox");
 			KVServiceRequest kv_r;
 			kv_r.set_request_id(get_id);
-			kv_r.set_allocated_get(&g);
-
+			GetRequest* g = kv_r.mutable_get();
+			g->set_row(user);
+			g->set_column("mbox");
+			
 			session.request(&response, kv_r);
 
 			switch (response.response_code()) {
@@ -170,49 +144,89 @@ WebmailResponseCode delete_email(string user, int index) {
 					emails = parse_messages(contents);
 					break;
 				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
 					return MISSING_USER;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
+					session.disconnect();
 					server++;
 					continue;
 			}
 		}
 
 		{
-			if (index < 0 || index > emails.size()) {
-				return INVALID_INDEX;
+			if (emails.find(index) == emails.end()) {
+				session.disconnect();
+				return WebmailResponseCode::SUCCESS;
 			}
-			emails.erase(emails.begin() + index);
-			ComparePutRequest p;
-			p.set_row(user);
-			p.set_column("mbox");
-			p.set_old_value(contents);
-			p.set_new_value(to_mbox(emails));
-
+			emails.erase(emails.find(index));
 			KVServiceRequest kv_p;
 			kv_p.set_request_id(delete_id);
-			kv_p.set_allocated_compare_put(&p);
+
+			ComparePutRequest* p = kv_p.mutable_compare_put();
+			p->set_row(user);
+			p->set_column("mbox");
+			p->set_old_value(contents);
+			p->set_new_value(to_mbox(emails));
 			session.request(&response, kv_p);
 
+			session.disconnect();
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
-					return WebmailResponseCode::SUCCESS;
+					succeeded = true;
+					break;
 				case ResponseCode::OLD_VALUE_DIFF:
-					return WebmailResponseCode::CONCURRENT_CHANGE;
+					continue;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
-					// Failure here could be either that the message was changed
-					// or that the RPC failed. Unfortunately it's hard to distinguish
-					// right now.
 					server++;
 					continue;
 			}
 		}
 	}
-	return WebmailResponseCode::FAILURE;
+
+	if (!succeeded)	{
+		return WebmailResponseCode::FAILURE;
+	}
+
+	while (server < config.servers_size()) {
+		KVSession session(config.servers(server).client_addr().ip_address(),
+											config.servers(server).client_addr().port());
+		if (session.connect() != 0) {
+			server++;
+			continue;
+		}
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(get_id);
+
+			kvservice::DeleteRequest* d = kv_r.mutable_delete_();
+			d->set_row(user);
+			d->set_column("mail" + to_string(index));
+			
+			session.request(&response, kv_r);
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					contents = response.get().value();
+					emails = parse_messages(contents);
+					break;
+				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
+					return MISSING_USER;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					session.disconnect();
+					server++;
+					continue;
+			}
+		}
+	}
 }
 
-vector<Email> get_messages(string user) {
+map<int, Email> get_messages(string user) {
 	int id = next_id();
 	int index = 0;
 	string contents;
@@ -220,17 +234,21 @@ vector<Email> get_messages(string user) {
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
+		if (session.connect() != 0) {
+			map<int, Email> x;
+			return x;
+		}
 		KVServiceResponse response;
 
-		GetRequest g;
-		g.set_row(user);
-		g.set_column("mbox");
 		KVServiceRequest kv_r;
+		GetRequest* g = kv_r.mutable_get();
+		g->set_row(user);
+		g->set_column("mbox");
 		kv_r.set_request_id(id);
-		kv_r.set_allocated_get(&g);
 
 		session.request(&response, kv_r);
 
+		session.disconnect();
 		switch (response.response_code()) {
 			case ResponseCode::SUCCESS:
 				contents = response.get().value();
@@ -243,6 +261,38 @@ vector<Email> get_messages(string user) {
 	}
 
 	return parse_messages(contents);
+}
+
+string get_email(string user, int id) {
+	int index = 0;
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		if (session.connect() != 0) {
+			return "";
+		}
+		KVServiceResponse response;
+
+		KVServiceRequest kv_r;
+		GetRequest* g = kv_r.mutable_get();
+		g->set_row(user);
+		g->set_column("mail" + to_string(id));
+		kv_r.set_request_id(id);
+
+		session.request(&response, kv_r);
+
+		session.disconnect();
+		switch (response.response_code()) {
+			case ResponseCode::SUCCESS:
+				return response.get().value();
+				break;
+			case ResponseCode::FAILURE:
+			case ResponseCode::SERVICE_FAIL:
+				index++;
+				continue;
+		}
+	}
+	return "";
 }
 
 // This is the MAIN function for the thread.
@@ -269,23 +319,18 @@ void* pop3(void* arg) {
 		switch (message.service_request_case()) {
 			case WebmailServiceRequest::ServiceRequestCase::kE: 
 				{
-					vector<Email> messages = get_messages(message.user());
-					int id = message.e().message_id();
+					string email = get_email(message.user(), message.e().message_id());
 					WebmailServiceResponse wsr;
 					wsr.set_request_id(message.request_id());
 					wsr.set_user(message.user());
 				
-					if (id < 0 || id > messages.size()) {
-						GenericResponse response;
+					if (email.empty()) {
+						GenericResponse* response = wsr.mutable_generic();
 						wsr.set_response_code(WebmailResponseCode::INVALID_INDEX);
-						wsr.set_allocated_generic(&response);
 					} else {
-						EmailResponse response;
-						Email e = messages[id];
-	
-						response.set_message(e.from() + "\n" + e.email());
+						EmailResponse* response = wsr.mutable_get();
+						response->set_message(email);
 						wsr.set_response_code(WebmailResponseCode::SUCCESS);
-						wsr.set_allocated_get(&response);
 					}
 					ProtoUtil::writeDelimitedTo(wsr, os);
 
@@ -295,9 +340,9 @@ void* pop3(void* arg) {
 			case WebmailServiceRequest::ServiceRequestCase::kD:
 				{
 					WebmailServiceResponse wsr;
+					GenericResponse* g = wsr.mutable_generic();
 					wsr.set_request_id(message.request_id());
 					wsr.set_user(message.user());
-					wsr.set_allocated_generic(new GenericResponse());
 
 					if (delete_email(message.user(), message.d().message_id())) {
 						wsr.set_response_code(WebmailResponseCode::SUCCESS);
@@ -311,20 +356,20 @@ void* pop3(void* arg) {
 
 			case WebmailServiceRequest::ServiceRequestCase::kM:
 				{
-					vector<Email> messages = get_messages(message.user());
-					MessagesResponse response;
+					map<int, Email> messages = get_messages(message.user());
+					WebmailServiceResponse resp;
+					MessagesResponse* response = resp.mutable_m();
 	
 					for (auto i = messages.begin(); i != messages.end(); i++) {
-						Email* page = response.add_page();
-						page->set_from(i->from());
-						page->set_email(i->email());
+						Email* page = response->add_page();
+						page->set_from(i->second.from());
+						page->set_id(i->second.id());
 					}
 
-					WebmailServiceResponse resp;
+					
 					resp.set_request_id(message.request_id());
 					resp.set_user(message.user());
 					resp.set_response_code(WebmailResponseCode::SUCCESS);
-					resp.set_allocated_m(&response);
 					ProtoUtil::writeDelimitedTo(resp, os);
 					break;
 				}
