@@ -226,17 +226,15 @@ WebmailResponseCode delete_email(string user, int index) {
 	}
 }
 
-map<int, Email> get_messages(string user) {
+string get_mbox(string user) {
 	int id = next_id();
 	int index = 0;
-	string contents;
 	
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
 		if (session.connect() != 0) {
-			map<int, Email> x;
-			return x;
+			return "";
 		}
 		KVServiceResponse response;
 
@@ -251,8 +249,7 @@ map<int, Email> get_messages(string user) {
 		session.disconnect();
 		switch (response.response_code()) {
 			case ResponseCode::SUCCESS:
-				contents = response.get().value();
-				break;
+				return response.get().value();
 			case ResponseCode::FAILURE:
 			case ResponseCode::SERVICE_FAIL:
 				index++;
@@ -260,7 +257,12 @@ map<int, Email> get_messages(string user) {
 		}
 	}
 
-	return parse_messages(contents);
+	return "";
+}
+
+map<int, Email> get_messages(string user) {
+	string mbox = get_mbox(user);
+	return parse_messages(mbox);
 }
 
 string get_email(string user, int id) {
@@ -302,7 +304,7 @@ void* pop3(void* arg) {
 	set<int> deleted;
 	
 	google::protobuf::io::ZeroCopyInputStream* is = new google::protobuf::io::FileInputStream(data->comm_fd);
-	google::protobuf::io::ZeroCopyOutputStream* os = new google::protobuf::io::FileOutputStream(data->comm_fd);
+	google::protobuf::io::FileOutputStream* os = new google::protobuf::io::FileOutputStream(data->comm_fd);
 	WebmailServiceRequest message;
 	
 	while(true) {
@@ -333,6 +335,7 @@ void* pop3(void* arg) {
 						wsr.set_response_code(WebmailResponseCode::SUCCESS);
 					}
 					ProtoUtil::writeDelimitedTo(wsr, os);
+					os->Flush();
 
 					break;
 				}
@@ -344,12 +347,9 @@ void* pop3(void* arg) {
 					wsr.set_request_id(message.request_id());
 					wsr.set_user(message.user());
 
-					if (delete_email(message.user(), message.d().message_id())) {
-						wsr.set_response_code(WebmailResponseCode::SUCCESS);
-					} else {
-						wsr.set_response_code(WebmailResponseCode::FAILURE);
-					}
+					wsr.set_response_code(delete_email(message.user(), message.d().message_id()));
 					ProtoUtil::writeDelimitedTo(wsr, os);
+					os->Flush();
 
 					break;
 				}
@@ -371,6 +371,7 @@ void* pop3(void* arg) {
 					resp.set_user(message.user());
 					resp.set_response_code(WebmailResponseCode::SUCCESS);
 					ProtoUtil::writeDelimitedTo(resp, os);
+					os->Flush();
 					break;
 				}
 		}

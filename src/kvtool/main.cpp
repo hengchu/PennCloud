@@ -83,11 +83,7 @@ int main(int argc, char *argv[])
   KVServiceRequest request;
 
   if (mode == "put") {
-    if (value.empty()) {
-      std::cerr << "Please specify value." << std::endl;
-      return 1;
-    }
-    
+        
     auto putReq = request.mutable_put();
     putReq->set_row(row);
     putReq->set_column(col);
@@ -101,16 +97,7 @@ int main(int argc, char *argv[])
     deleteReq->set_row(row);
     deleteReq->set_column(col);
   } else if (mode == "cnp") {
-    if (oldValue.empty()) {
-      std::cerr << "Please specify old value." << std::endl;
-      return 1;
-    }
-
-    if (value.empty()) {
-      std::cerr << "Please specify value." << std::endl;
-      return 1;
-    }
-
+    
     auto cnpReq = request.mutable_compare_put();
     cnpReq->set_row(row);
     cnpReq->set_column(col);
