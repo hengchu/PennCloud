@@ -300,8 +300,6 @@ string get_email(string user, int id) {
 // This is the MAIN function for the thread.
 void* pop3(void* arg) {
 	struct echo_data* data = (struct echo_data*) arg;
-
-	set<int> deleted;
 	
 	google::protobuf::io::ZeroCopyInputStream* is = new google::protobuf::io::FileInputStream(data->comm_fd);
 	google::protobuf::io::FileOutputStream* os = new google::protobuf::io::FileOutputStream(data->comm_fd);
