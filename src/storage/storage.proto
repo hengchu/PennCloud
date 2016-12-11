@@ -37,13 +37,13 @@ message StorageServiceRequest {
   string user = 2;
  
   oneof service_request {
-    CreateRequest c = 3;
-    CreateDirectoryRequest cd = 4;
-    UpdateRequest u = 5;
-    GetDirectoryRequest gd = 6;
-    GetFileRequest gf = 7;
-    DeleteRequest d = 8;
-    RenameRequest r = 9;
+    CreateRequest create = 3;
+    CreateDirectoryRequest mkdir = 4;
+    UpdateRequest update = 5;
+    GetDirectoryRequest getdir = 6;
+    GetFileRequest getfile = 7;
+    DeleteRequest delete = 8;
+    RenameRequest rename = 9;
   };
 };
 
@@ -87,9 +87,9 @@ message StorageServiceResponse {
   
   StorageResponseCode response_code = 3;
   oneof service_response {
-    GenericResponse g = 4;
-    GetDirectoryResponse p = 5;
-    GetFileResponse c = 6;
+    GenericResponse generic = 4;
+    GetDirectoryResponse getdir = 5;
+    GetFileResponse getfile = 6;
     FailureResponse failure = 7;
   };
 };
