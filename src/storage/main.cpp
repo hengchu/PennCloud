@@ -767,7 +767,8 @@ void* storage_main(void* arg) {
 			case StorageServiceRequest::ServiceRequestCase::kRename:
 				{
 					StorageResponseCode c = rename_file(message.user(),
-							message.delete_().filename());
+							message.rename().original(),
+							message.rename().new_());
 					GenericResponse* g = wsr.mutable_generic();
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
