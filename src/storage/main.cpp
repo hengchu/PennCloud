@@ -194,6 +194,7 @@ int next_inode(string to) {
 			p->set_new_value(to_string(id + 1));
 
 			session.request(&response, kv_p);
+			session.disconnect();
 
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
@@ -201,13 +202,11 @@ int next_inode(string to) {
 					break;
 				case ResponseCode::OLD_VALUE_DIFF:
 					// In this case we need to retry, but can use the same server.
-					session.disconnect();
 					continue;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
 				case ResponseCode::INVALID:
 				case ResponseCode::NO_SUCH_KEY:
-					session.disconnect();
 					index++;
 					continue;
 			}
@@ -229,7 +228,9 @@ contents_of(string user, int inode, string& contents) {
 		g->set_row(user);
 		g->set_column("inode" + to_string(inode));
 		
+		session.connect();
 		session.request(&response, kv_r); 
+		session.disconnect();
 	
 		switch (response.response_code()) {
 			case ResponseCode::SUCCESS:
@@ -253,7 +254,6 @@ StorageResponseCode inode_of(string user, string path, DirectoryType d, int& ino
 	int current_inode = 0;
 	DirectoryType current = DIRECTORY;
 	for (auto i = paths.begin(); i != paths.end(); i++) {
-		if (i + 1 == paths.end()) break;
 		if (current != DIRECTORY) {
 			return MISSING_FILE;		
 		}
@@ -289,12 +289,15 @@ bool user_exists(string to) {
 
 		{
 			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
 			GetRequest* g = kv_r.mutable_get();
 			g->set_row(to);
 			g->set_column("inode0");
 		
+			session.connect();
 			session.request(&response, kv_r); 
-	
+			session.disconnect();
+
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
 					return true;
@@ -311,7 +314,7 @@ bool user_exists(string to) {
 }
 
 StorageResponseCode add_inode(string user, string path, int inode, string contents) {
-	if (!user_exists) {
+	if (!user_exists(user)) {
 		return MISSING_USER;
 	}
 
@@ -328,6 +331,7 @@ StorageResponseCode add_inode(string user, string path, int inode, string conten
 			cpr->set_column("inode" + to_string(inode));
 			cpr->set_value(contents);
 
+			session.connect();
 			session.request(&response, kv_r);
 
 			session.disconnect();
@@ -347,18 +351,22 @@ StorageResponseCode add_inode(string user, string path, int inode, string conten
 
 
 StorageResponseCode update_contents(string user, string path, string new_file) {
-	if (!user_exists) {
+	if (!user_exists(user)) {
 		return MISSING_USER;
 	}
 
 	int inode;
 	StorageResponseCode c = inode_of(user, path, DirectoryType::FILE, inode);
-	
+	if (c != StorageResponseCode::SUCCESS) {
+		return c;
+	}
+
 	int index = 0;
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
 		KVServiceResponse response;
+		session.connect();
 
 		string old;
 		{
@@ -372,10 +380,13 @@ StorageResponseCode update_contents(string user, string path, string new_file) {
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
 					old = response.get().value();
+					break;
 				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
 					return MISSING_FILE;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
+					session.disconnect();
 					index++;
 					continue;
 			}
@@ -409,7 +420,7 @@ StorageResponseCode update_contents(string user, string path, string new_file) {
 }
 
 StorageResponseCode get_file(string user, string path, string& contents) {
-	if (!user_exists) {
+	if (!user_exists(user)) {
 		return MISSING_USER;
 	}
 
@@ -422,7 +433,7 @@ StorageResponseCode get_file(string user, string path, string& contents) {
 }
 
 StorageResponseCode get_dir(string user, string path, vector<DirectoryEntry>& entries) {
-	if (!user_exists) {
+	if (!user_exists(user)) {
 		return MISSING_USER;
 	}
 
@@ -438,6 +449,7 @@ StorageResponseCode get_dir(string user, string path, vector<DirectoryEntry>& en
 	if (c != StorageResponseCode::SUCCESS) {
 		return c;
 	}
+
 	map<string, INodeEntry> parsed = parse_inode(contents);
 
 	for (auto i = parsed.begin(); i != parsed.end(); i++) {
@@ -459,6 +471,7 @@ StorageResponseCode delete_entry(string user, string path, string name) {
 	while (index < config.servers_size()) {
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
+		session.connect();
 		KVServiceResponse response;
 
 		string old;
@@ -473,17 +486,21 @@ StorageResponseCode delete_entry(string user, string path, string name) {
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
 					old = response.get().value();
+					break;
 				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
 					return MISSING_FILE;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
 					index++;
+					session.disconnect();
 					continue;
 			}
 		}
 
 		map<string, INodeEntry> entries = parse_inode(old);
 		if (entries.find(name) == entries.end()) {
+			session.disconnect();
 			return StorageResponseCode::SUCCESS;
 		}
 
@@ -530,7 +547,9 @@ StorageResponseCode delete_inode(string user, int inode) {
 			d->set_row(user);
 			d->set_column("inode" + to_string(inode));
 		
+			session.connect();
 			session.request(&response, kv_r); 
+			session.disconnect();
 	
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
@@ -548,7 +567,8 @@ StorageResponseCode delete_inode(string user, int inode) {
 
 StorageResponseCode append_entry(string user, string path, int inode, DirectoryType type, string name) {
 	int base_inode;
-	StorageResponseCode c = inode_of(user, path, type, base_inode);
+	StorageResponseCode c = inode_of(user, path, DIRECTORY, base_inode);
+	
 	if (c != StorageResponseCode::SUCCESS) {
 		return c;
 	}
@@ -558,6 +578,8 @@ StorageResponseCode append_entry(string user, string path, int inode, DirectoryT
 		KVSession session(config.servers(index).client_addr().ip_address(),
 											config.servers(index).client_addr().port());
 		KVServiceResponse response;
+
+		session.connect();
 
 		string old;
 		{
@@ -571,11 +593,14 @@ StorageResponseCode append_entry(string user, string path, int inode, DirectoryT
 			switch (response.response_code()) {
 				case ResponseCode::SUCCESS:
 					old = response.get().value();
+					break;
 				case ResponseCode::NO_SUCH_KEY:
+					session.disconnect();
 					return MISSING_FILE;
 				case ResponseCode::FAILURE:
 				case ResponseCode::SERVICE_FAIL:
 					index++;
+					session.disconnect();
 					continue;
 			}
 		}
@@ -612,6 +637,7 @@ StorageResponseCode append_entry(string user, string path, int inode, DirectoryT
 
 StorageResponseCode new_file(string user, string path, string contents) {
 	if (!user_exists(user)) return StorageResponseCode::MISSING_USER;
+	
 	string base = base_path(path);
 	string name = filename(path);
 
@@ -626,6 +652,7 @@ StorageResponseCode new_file(string user, string path, string contents) {
 
 StorageResponseCode new_directory(string user, string path) {
 	if (!user_exists(user)) return StorageResponseCode::MISSING_USER;
+
 	string base = base_path(path);
 	string directory_name = filename(path);
 
@@ -648,6 +675,7 @@ StorageResponseCode delete_file(string user, string path) {
 
 	c = delete_entry(user, base, name);
 	if (c != StorageResponseCode::SUCCESS) return c;
+
 	return delete_inode(user, inode);
 }
 
@@ -681,14 +709,13 @@ void* storage_main(void* arg) {
 	while(true) {
 		bool got_message = ProtoUtil::readDelimitedFrom(is, &message);
 		if (!got_message) {
-			cout << "Error reading from socket.";
 			close(data->comm_fd);
 			CLOSE_CONNECTION(data->comm_fd);
 			remove_thread(pthread_self(), data->comm_fd);
 
 			pthread_exit(NULL);
 		}
-
+		
 		StorageServiceResponse wsr;
 
 		switch (message.service_request_case()) {
@@ -701,6 +728,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kMkdir:
@@ -711,6 +739,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kUpdate:
@@ -722,6 +751,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kGetdir:
@@ -739,6 +769,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kGetfile:
@@ -752,6 +783,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kDelete:
@@ -762,6 +794,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 
 			case StorageServiceRequest::ServiceRequestCase::kRename:
@@ -773,6 +806,7 @@ void* storage_main(void* arg) {
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
+					break;
 				}
 		}
 
@@ -834,7 +868,7 @@ void server(bool verbose, int port) {
 int main(int argc, char *argv[])
 {
 	char o = 0;
-	int port = 2500;
+	int port = 8000;
 	while ((o = getopt(argc, argv, "avp:")) != -1) {
 		switch(o) {
 		case 'a':
