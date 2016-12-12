@@ -464,7 +464,7 @@ StorageResponseCode get_dir(string user, string path, vector<DirectoryEntry>& en
 
 StorageResponseCode delete_entry(string user, string path, string name) {
 	int base_inode;
-	StorageResponseCode c = inode_of(user, path, DirectoryType::FILE, base_inode);
+	StorageResponseCode c = inode_of(user, path, DIRECTORY, base_inode);
 	if (c != StorageResponseCode::SUCCESS) return c;
 
 	int index = 0;
@@ -686,10 +686,6 @@ StorageResponseCode rename_file(string user, string path, string to) {
 
 	int inode;
 	StorageResponseCode c = inode_of(user, path, DirectoryType::FILE, inode);
-	if (c != StorageResponseCode::SUCCESS) return c;
-	int to_inode;
-	// mostly for checking
-	c = inode_of(user, to, DirectoryType::DIRECTORY, to_inode);
 	if (c != StorageResponseCode::SUCCESS) return c;
 
 	c = delete_entry(user, base, name);
