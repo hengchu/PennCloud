@@ -71,20 +71,32 @@ const char* crlf = "\r\n";
 
 
 // an auxiliary function to trim whitespace at the start and end of a string
-std::string trim_string(std::string line){
+std::string trim_string(std::string line, bool spaces){
 	printf("CALLED TRIM\n");
 
 	if(line.size() == 0){return line;}
-
-	while(line.at(0) == ' ' or line.at(0) == '\t' or line.at(0) == '\r' or line.at(0) == '\n'){
-
-		line.erase(0,1);
-		if(line.size() == 0){return line;}
-	}
-	printf("DID FRONT\n");
-	while(line.back() == ' ' or line.back() == '\t' or line.back() == '\r' or line.back() == '\n'){
-		line.erase(line.size()-1);
-		if(line.size() == 0){return line;}
+	if(spaces){
+		while(line.at(0) == ' ' or line.at(0) == '\t' or line.at(0) == '\r' or line.at(0) == '\n'){
+	
+			line.erase(0,1);
+			if(line.size() == 0){return line;}
+		}
+		printf("DID FRONT\n");
+		while(line.back() == ' ' or line.back() == '\t' or line.back() == '\r' or line.back() == '\n'){
+			line.erase(line.size()-1);
+			if(line.size() == 0){return line;}
+		}
+	}else{
+		while(line.at(0) == '\r' or line.at(0) == '\n'){
+			
+					line.erase(0,1);
+					if(line.size() == 0){return line;}
+				}
+				printf("DID FRONT\n");
+				while(line.back() == '\r' or line.back() == '\n'){
+					line.erase(line.size()-1);
+					if(line.size() == 0){return line;}
+				}
 	}
 	printf("DID BACK\n");
 	printf("FINISHED TRIM\n");
@@ -100,7 +112,7 @@ std::vector<std::string> split_string(const std::string& str, const std::string&
     std::vector<std::string> tokens;
     size_t prev = 0, pos = 0;
 
-    std::string teststr = trim_string(str);
+    std::string teststr = trim_string(str, true);
     printf("TESTSTR SIZE IS %u\n",teststr.size());
     if(teststr.size() == 0){printf("RETURNING EMPTY VECTOR!\n"); return tokens;}
 
@@ -151,7 +163,7 @@ void handle_command(std::string rawstring, int sock){
 	for(int j=0;j<rawstring.length();j++){
 		printf(" %d",(int)rawstring[j]);
 	}
-
+	rawstring = trim_string(rawstring,false);
 	lines = split_string(rawstring,"\n");
 	unsigned int numlines = lines.size();
 	printf("numlines %u \n",numlines);
@@ -197,7 +209,8 @@ void handle_command(std::string rawstring, int sock){
 			if(_fget or _fpost){
 				// check for valid version
 				// check HTTP/1.0 or 1.1
-				words[2] = trim_string(words[2]);
+				printf("HANDLING POST OR GET\n");
+				words[2] = trim_string(words[2],true);
 				if(strncmp(words[2].data(),"HTTP/1.0",8)!=0 and strncmp(words[2].data(),"HTTP/1.1",8)!=0){
 
 					write(sock,http_v,strlen(http_v));
@@ -208,7 +221,8 @@ void handle_command(std::string rawstring, int sock){
 				}
 
 				// load up the resource
-				resource = trim_string(words[1]);
+				resource = trim_string(words[1],true);
+				printf("RESOURCE NAME: %s\n",resource.data());
 			}
 			else{return;
 
@@ -235,7 +249,7 @@ void handle_command(std::string rawstring, int sock){
 			}
 			else{
 				std::transform(words[0].begin(), words[0].end(), words[0].begin(), ::tolower);
-				words[0] = trim_string(words[0]);
+				words[0] = trim_string(words[0],false);
 				// check if we have a valid header
 				if(std::find(valid_headers.begin(), valid_headers.end(),words[0]) != valid_headers.end()){
 					lasthead = words[0];
@@ -249,7 +263,7 @@ void handle_command(std::string rawstring, int sock){
 			}
 			// loop over the rest of the things
 			for(int j=1;i<words.size();i++){
-				words[j] = trim_string(words[j]);
+				words[j] = trim_string(words[j],true);
 				if(currhead == "user-agent:" and words[j].length() > 0){
 					ua.push_back(words[j]);
 				}
@@ -283,16 +297,16 @@ void handle_command(std::string rawstring, int sock){
 	// if we had a GET:
 	if(_fget){
 		// check if we are getting homepage:
-		if(resource.compare("/") == 0 or resource.compare("/index.html") == 0){
+		if(resource.compare("/") == 0 or resource.compare("/index.html") == 0 or resource.compare("/index") == 0){
 			// get the index
-
+			printf("GETTING INDEX\n");
 
 			getrq -> set_column("common");
 			getrq -> set_row("index");
 			if(kvs.request(&resp, req) != 0){
 				perror("REQUEST FAIL!\n");
 			}
-
+			printf("REQUESTED!\n");
 			std::cout << resp.DebugString() << std::endl;
 
 
@@ -372,6 +386,7 @@ void handle_command(std::string rawstring, int sock){
 		}
 		else{
 			write(sock,ok,strlen(ok));
+			write(sock,crlf,2);
 
 
 			//time
@@ -387,6 +402,7 @@ void handle_command(std::string rawstring, int sock){
 
 			// content length
 			int cl = (int)contents.length();
+			printf("GOT LENGTH! %d\n",cl);
 			write(sock,"content-length: ",16);
 			write(sock,(char*)cl,strlen((char*)cl));
 			write(sock,crlf,2);
