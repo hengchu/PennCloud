@@ -72,7 +72,7 @@ const char* crlf = "\r\n";
 
 // an auxiliary function to trim whitespace at the start and end of a string
 std::string trim_string(std::string line, bool spaces){
-	printf("CALLED TRIM\n");
+	//printf("CALLED TRIM\n");
 
 	if(line.size() == 0){return line;}
 	if(spaces){
@@ -81,7 +81,7 @@ std::string trim_string(std::string line, bool spaces){
 			line.erase(0,1);
 			if(line.size() == 0){return line;}
 		}
-		printf("DID FRONT\n");
+		//printf("DID FRONT\n");
 		while(line.back() == ' ' or line.back() == '\t' or line.back() == '\r' or line.back() == '\n'){
 			line.erase(line.size()-1);
 			if(line.size() == 0){return line;}
@@ -92,14 +92,14 @@ std::string trim_string(std::string line, bool spaces){
 					line.erase(0,1);
 					if(line.size() == 0){return line;}
 				}
-				printf("DID FRONT\n");
+				//printf("DID FRONT\n");
 				while(line.back() == '\r' or line.back() == '\n'){
 					line.erase(line.size()-1);
 					if(line.size() == 0){return line;}
 				}
 	}
-	printf("DID BACK\n");
-	printf("FINISHED TRIM\n");
+	//printf("DID BACK\n");
+	//printf("FINISHED TRIM\n");
 	return line;
 }
 
@@ -108,27 +108,29 @@ std::string trim_string(std::string line, bool spaces){
 
 std::vector<std::string> split_string(const std::string& str, const std::string& delim)
 {
-	printf("INVOKED SPLIT\n");
+	//printf("INVOKED SPLIT\n");
     std::vector<std::string> tokens;
     size_t prev = 0, pos = 0;
 
     std::string teststr = trim_string(str, true);
-    printf("TESTSTR SIZE IS %u\n",teststr.size());
-    if(teststr.size() == 0){printf("RETURNING EMPTY VECTOR!\n"); return tokens;}
+    //printf("TESTSTR SIZE IS %u\n",teststr.size());
+    if(teststr.size() == 0){//printf("RETURNING EMPTY VECTOR!\n"); return tokens;
+    	}
+    
 
     do
     {
-    	printf("SPLIT DO START\n");
+    	//printf("SPLIT DO START\n");
         pos = str.find(delim, prev);
         if (pos == std::string::npos) pos = str.length();
         std::string token = str.substr(prev, pos-prev);
         if (!token.empty()) tokens.push_back(token);
         prev = pos + delim.length();
-        printf("SPLIT DO END %s\n", token.data());
+        //printf("SPLIT DO END %s\n", token.data());
     }
 
     while (pos < str.length() && prev < str.length());
-    printf("SIZE OF TOKESN IS %d\n",tokens.size());
+    //printf("SIZE OF TOKESN IS %d\n",tokens.size());
     return tokens;
 }
 
@@ -182,19 +184,19 @@ void handle_command(std::string rawstring, int sock){
 	int fd;
 
 	for(int i=0;i<numlines;i++){
-		printf("%s\n",lines[i].data());
-		printf("looping %d\n",i);
+		//printf("%s\n",lines[i].data());
+		//printf("looping %d\n",i);
 
 		std::vector<std::string> words = split_string(lines[i]," ");
-		printf("SPLIT WORKED!\n");
+		//printf("SPLIT WORKED!\n");
 		printf("WORDS 0 is %s\n",words[0].data());
 		// if this is the first line:
 		if(i == 0){
 			if(words.size() < 3){return;}
 			// check if we start with a command
 			//words[0] = trim_string(words[0]);
-			printf("words 0\n");
-			printf(words[0].data());
+			//printf("words 0\n");
+			//printf(words[0].data());
 
 			if(words[0].compare("POST") == 0){
 				_fpost = true;
@@ -234,7 +236,7 @@ void handle_command(std::string rawstring, int sock){
 
 		else if (words.size() > 0){//not the first line, still have stuff
 
-			printf("ARE WE FAULTING IN HERE??\n");
+			//printf("ARE WE FAULTING IN HERE??\n");
 			std::string currhead("NULL");
 			// check if we are continuing a previous header
 
@@ -286,11 +288,12 @@ void handle_command(std::string rawstring, int sock){
 	// lookup cookie
 	if(cook.size() > 0){
 		ccook = cook[0];
+		printf("YOU GAVE ME A GOOD COOKIE! :: %s\n",ccook.data());
 
 	}
 	else{ // generate a cookie
 		cookie_gen++;
-		ccook = std::to_string(cookie_gen);
+		ccook = "testcookie";
 
 		// add cookie to map
 	}
@@ -300,17 +303,42 @@ void handle_command(std::string rawstring, int sock){
 		if(resource.compare("/") == 0 or resource.compare("/index.html") == 0 or resource.compare("/index") == 0){
 			// get the index
 			printf("GETTING INDEX\n");
-
-			getrq -> set_column("common");
 			getrq -> set_row("index");
+			getrq -> set_column("common");
+			
+			
 			if(kvs.request(&resp, req) != 0){
-				perror("REQUEST FAIL!\n");
-			}
-			printf("REQUESTED!\n");
-			std::cout << resp.DebugString() << std::endl;
-
-
+						perror("REQUEST FAIL!\n");
+					}
+					printf("REQUESTED!\n");
+					std::cout << resp.DebugString() << std::endl;
+					
+					switch (resp.service_response_case()) {
+						case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+							contents= resp.get().value();
+							break;
+						case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+							contents = "no permission";
+							write(sock,http_v,strlen(http_v));
+							write(sock,"404 Not found or no permission",30);
+							write(sock,crlf,2);
+							return;
+					}
+		
+			
+		}else if(resource.compare("/login") == 0 or resource.compare("/register") == 0){
+			getrq ->set_row("/login");
+			getrq -> set_column("common");
+			printf("RESOURCE IS HERE\n");
+			
 		}
+		
+		
+		
+	
+
+
+		
 		else{ // not looking for a common resource: lookup pair is (cookie, resource)
 
 			// lookup username from ("clist",cookie)
@@ -394,6 +422,11 @@ void handle_command(std::string rawstring, int sock){
 			time_s = ctime(&cur_time);
 			write(sock,"Date: ",6);
 			write(sock,time_s,strlen(time_s));
+			
+			//cookie
+			write(sock,"set-cookie: ",12);
+			write(sock,ccook.data(),strlen(ccook.data()));
+			write(sock,crlf,2);
 
 			//content type
 			write(sock,"content-type: ",14);
@@ -403,8 +436,10 @@ void handle_command(std::string rawstring, int sock){
 			// content length
 			int cl = (int)contents.length();
 			printf("GOT LENGTH! %d\n",cl);
+			
+			
 			write(sock,"content-length: ",16);
-			write(sock,(char*)cl,strlen((char*)cl));
+			write(sock,std::to_string(cl).data(),strlen(std::to_string(cl).data()));
 			write(sock,crlf,2);
 
 			// blank line
@@ -415,6 +450,7 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,crlf,2);
 
 		}
+
 
 
 
@@ -586,7 +622,9 @@ void *handle_connection(void *s){
 		  for(int i=0;i<rec;i++){
 
 			  c = msg[i];
-			  if((int)c == 0){printf("NULL CHAR!\n");}
+			  if((int)c == 0){//printf("NULL CHAR!\n");
+				  
+			  }
 			  if((int)c!=0){
 
 				  e_msg[counter] = c;
