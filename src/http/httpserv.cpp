@@ -193,7 +193,7 @@ void handle_command(std::string rawstring, int sock){
 		printf("WORDS 0 is %s\n",words[0].data());
 		// if this is the first line:
 		if(i == 0){
-			if(words.size() < 3){return;}
+			if(words.size() < 3){exit(1);}
 			// check if we start with a command
 			//words[0] = trim_string(words[0]);
 			//printf("words 0\n");
@@ -349,6 +349,7 @@ void handle_command(std::string rawstring, int sock){
 							contents = "no permission";
 							write(sock,notfound,strlen(notfound));
 							write(sock,crlf,2);
+							write(sock, "Content-Length: 2",17);
 							write(sock,crlf,2);
 							write(sock,"NO",2);
 							write(sock,crlf,2);
@@ -356,7 +357,7 @@ void handle_command(std::string rawstring, int sock){
 					}
 		
 			
-		}else if(resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0){
+		}else if(resource.compare("/upload") == 0 or resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0){
 			getrq ->set_row(resource);
 			getrq -> set_column("common");
 			printf("RESOURCE IS HERE\n");
@@ -375,9 +376,12 @@ void handle_command(std::string rawstring, int sock){
 							contents = "no permission";
 							write(sock,notfound,strlen(notfound));
 							write(sock,crlf,2);
-													write(sock,crlf,2);
-													write(sock,"NO",2);
+							write(sock, "Content-Length: 2",17);
 							write(sock,crlf,2);
+							write(sock,crlf,2);
+							write(sock,"NO",2);
+							write(sock,crlf,2);
+							return;
 					}
 			
 		}
@@ -391,8 +395,8 @@ void handle_command(std::string rawstring, int sock){
 		else{ // not looking for a common resource: lookup pair is (cookie, resource)
 
 			// lookup username from ("clist",cookie)
-			getrq -> set_column("clist");
-			getrq -> set_row(ccook);
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
 
 			if(kvs.request(&resp,req) != 0){
 				perror("REQUEST FAIL! \n");
@@ -407,13 +411,16 @@ void handle_command(std::string rawstring, int sock){
 			switch (resp.service_response_case()) {
 				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
 					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
 					break;
 				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
 					contents = "no permission";
 					write(sock,notfound,strlen(notfound));
 					write(sock,crlf,2);
-											write(sock,crlf,2);
-											write(sock,"NO",2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
 					write(sock,crlf,2);
 					return;
 			}
@@ -422,7 +429,7 @@ void handle_command(std::string rawstring, int sock){
 			// if username not ""
 
 			// if resource is /mail/*
-			if(resource.substr(5) == "/mail"){
+			if(resource.substr(9) == "/mail/msg"){
 				// send request to pop
 			}
 			else{
@@ -448,9 +455,11 @@ void handle_command(std::string rawstring, int sock){
 						contents = "no permission";
 						write(sock,notfound,strlen(notfound));
 						write(sock,crlf,2);
-												write(sock,crlf,2);
-												write(sock,"NO",2);
-						//write(sock,crlf,2);
+						write(sock, "Content-Length: 2",17);
+						write(sock,crlf,2);
+						write(sock,crlf,2);
+						write(sock,"NO",2);
+						write(sock,crlf,2);
 						return;
 				}
 			}
@@ -463,9 +472,11 @@ void handle_command(std::string rawstring, int sock){
 		if(contents.compare(std::string(notfound)) == 0){
 			write(sock,notfound,strlen(notfound));
 			write(sock,crlf,2);
+			write(sock, "Content-Length: 2",17);
 			write(sock,crlf,2);
-									write(sock,crlf,2);
-									write(sock,"NO",2);
+			write(sock,crlf,2);
+			write(sock,"NO",2);
+			write(sock,crlf,2);
 			return;
 		}
 		else{
@@ -527,7 +538,7 @@ void handle_command(std::string rawstring, int sock){
 			
 			
 		}
-		
+		if(resource == "/login" or resource == "/register"){
 		// if login
 
 		// get check un/pw combo
@@ -546,9 +557,9 @@ void handle_command(std::string rawstring, int sock){
 		printf("WE HAVE UN %s and PW %s\n",un.data(),pw.data());
 		
 		// check if un+pw combo exists in kvs
-
-		getrq -> set_column(un);
 		getrq -> set_row(pw);
+		getrq -> set_column(un);
+		
 
 		if(kvs.request(&resp,req) != 0){
 			perror("REQUEST FAIL! \n");
@@ -668,6 +679,16 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,crlf,2);
 			return;
 
+		}
+		
+		else if(resource == "/upload"){
+			printf("GOT AN UPLOAD.  SORRY SERVER!\n");
+			return;
+		}
+		
+		
+		
+		
 		}
 			
 			
