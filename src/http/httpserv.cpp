@@ -36,11 +36,6 @@
 
 
 
-
-
-
-
-
 // shorthand for maximum number of connections and buffersize, CRLF for parsing
 int MAXCON = 1024;
 int BUFMAX = 4096;
@@ -60,14 +55,11 @@ int clients[1024];
 
 
 std::vector<std::string> valid_headers = {"cookie:","user-agent:"};
-
 const char* ok = "200 OK";
 const char* notfound = "HTTP/1.1 404 Not Found";
 const char* http_v = "HTTP/1.1 ";
 const char* badreq = "400 Bad Request";
 const char* crlf = "\r\n";
-
-
 
 
 // an auxiliary function to trim whitespace at the start and end of a string
@@ -103,9 +95,7 @@ std::string trim_string(std::string line, bool spaces){
 	return line;
 }
 
-
-
-
+//splits a string at the given delimiter
 std::vector<std::string> split_string(const std::string& str, const std::string& delim)
 {
 	//printf("INVOKED SPLIT\n");
@@ -137,12 +127,7 @@ std::vector<std::string> split_string(const std::string& str, const std::string&
 
 
 
-
-
-
-
-
-// parses a string and performs the appropriate writes to the given socket
+// handles the incoming HTTP requests.  Supports GET, POST
 void handle_command(std::string rawstring, int sock){
 	KVSession kvs ("127.0.0.1",3500);
 	if(kvs.connect() != 0){
@@ -261,54 +246,6 @@ void handle_command(std::string rawstring, int sock){
 				printf("READ %s\n",post_data.data());
 			}
 		}
-		else if (words.size() > 0){//not the first line, still have stuff
-
-			//printf("ARE WE FAULTING IN HERE??\n");
-			std::string currhead("NULL");
-			// check if we are continuing a previous header
-
-			if(words[0] == " " and lasthead != "NULL"){
-				//part of last header
-				currhead = lasthead;
-			}
-
-			else if(words[0] == "\r"){
-				bool term = true;
-				break;
-			}
-			else{
-				std::transform(words[0].begin(), words[0].end(), words[0].begin(), ::tolower);
-				words[0] = trim_string(words[0],false);
-				// check if we have a valid header
-				if(std::find(valid_headers.begin(), valid_headers.end(),words[0]) != valid_headers.end()){
-					lasthead = words[0];
-					currhead = words[0];
-				}
-
-				else{// header not found
-					// write no such header
-					currhead = "NULL";
-				}
-			}
-			// loop over the rest of the things
-			for(int j=1;i<words.size();i++){
-				words[j] = trim_string(words[j],true);
-				if(currhead == "user-agent:" and words[j].length() > 0){
-					ua.push_back(words[j]);
-				}
-				else if(currhead == "cookie: "){
-					printf("GOT A COOKIE!\n");
-					cook.push_back(words[j]);
-				}
-			}
-
-
-		}
-
-
-
-
-
 
 	}
 	// done reading things in, do the output
@@ -327,68 +264,48 @@ void handle_command(std::string rawstring, int sock){
 	}
 	// if we had a GET:
 	if(_fget){
+		bool common = false;
 		// check if we are getting homepage:
 		if(resource.compare("/") == 0 or resource.compare("/index.html") == 0 or resource.compare("/index") == 0){
 			// get the index
 			printf("GETTING INDEX\n");
 			getrq -> set_row("index");
 			getrq -> set_column("common");
+			common = true;
 			
-			
-			if(kvs.request(&resp, req) != 0){
-						perror("REQUEST FAIL!\n");
-					}
-					printf("REQUESTED!\n");
-					std::cout << resp.DebugString() << std::endl;
 					
-					switch (resp.service_response_case()) {
-						case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
-							contents= resp.get().value();
-							break;
-						case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
-							contents = "no permission";
-							write(sock,notfound,strlen(notfound));
-							write(sock,crlf,2);
-							write(sock, "Content-Length: 2",17);
-							write(sock,crlf,2);
-							write(sock,"NO",2);
-							write(sock,crlf,2);
-							return;
-					}
-		
 			
 		}else if(resource.compare("/upload") == 0 or resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0){
 			getrq ->set_row(resource);
 			getrq -> set_column("common");
 			printf("RESOURCE IS HERE\n");
-			
-			if(kvs.request(&resp, req) != 0){
-						perror("REQUEST FAIL!\n");
-					}
-					printf("REQUESTED!\n");
-					std::cout << resp.DebugString() << std::endl;
-					
-					switch (resp.service_response_case()) {
-						case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
-							contents= resp.get().value();
-							break;
-						case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
-							contents = "no permission";
-							write(sock,notfound,strlen(notfound));
-							write(sock,crlf,2);
-							write(sock, "Content-Length: 2",17);
-							write(sock,crlf,2);
-							write(sock,crlf,2);
-							write(sock,"NO",2);
-							write(sock,crlf,2);
-							return;
-					}
-			
+			common = true
 		}
 		
 		
-		
-	
+		if(common){
+			if(kvs.request(&resp, req) != 0){
+						perror("REQUEST FAIL!\n");
+			}
+			printf("REQUESTED!\n");
+			std::cout << resp.DebugString() << std::endl;
+			
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					contents= resp.get().value();
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NO",2);
+					write(sock,crlf,2);
+					return;
+			}
+		}
 
 
 		
@@ -689,44 +606,11 @@ void handle_command(std::string rawstring, int sock){
 		
 		
 		
-		}
-			
-			
-			
-		
-
-
-
-
-//		KVSession kvs ("127.0.0.1",3500);
-//		if(kvs.connect() != 0){
-//			perror("KVS FAIL!\n");
-//
-//		}
-//
-//		kvservice::KVServiceRequest req;
-//
-//		kvservice::GetRequest *getrq = req.mutable_get();
-//
-//		getrq -> set_column("test1");
-//		getrq -> set_row("test2");
-//		kvservice::KVServiceResponse kvresp;
-//		if(kvs.request(&kvresp, req) != 0){
-//			perror("REQUEST FAIL!\n");
-//		}
-//
-//		std::cout << kvresp.DebugString() << std::endl;
-
+		}	
 
 	}
 
-
-
 }
-
-
-
-
 
 
 
@@ -853,18 +737,6 @@ void *handle_connection(void *s){
 }
 
 
-
-
-
-
-// splits a string at the specified character, stores them in a vector
-
-
-
-
-
-
-
 int main(int argc, char* argv[]){
 
   struct sockaddr_in clientaddr;
@@ -889,30 +761,6 @@ int main(int argc, char* argv[]){
 		  strcpy(rootdir,argv[a+1]);
 	  }
   }
-
-
-
-
-//	KVSession kvs ("127.0.0.1",3500);
-//	if(kvs.connect() != 0){
-//		perror("KVS FAIL!\n");
-//
-//	}
-//
-//	kvservice::KVServiceRequest req;
-//
-//	kvservice::GetRequest *getrq = req.mutable_get();
-//
-//	getrq -> set_column("test1");
-//	getrq -> set_row("test2");
-//	kvservice::KVServiceResponse kvresp;
-//	if(kvs.request(&kvresp, req) != 0){
-//		perror("REQUEST FAIL!\n");
-//	}
-//
-//	std::cout << kvresp.DebugString() << std::endl;
-
-
 
 
 
