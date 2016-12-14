@@ -45,7 +45,7 @@
 int MAXCON = 1024;
 int BUFMAX = 4096;
 #define CRLF "\r\n"
-
+char PORTNO[6];
 
 time_t cur_time;
 
@@ -62,8 +62,8 @@ int clients[1024];
 std::vector<std::string> valid_headers = {"cookie:","user-agent:"};
 
 const char* ok = "200 OK";
-const char* notfound = "404 File Not Found";
-const char* http_v = "HTTP/1.0 ";
+const char* notfound = "HTTP/1.1 404 Not Found";
+const char* http_v = "HTTP/1.1 ";
 const char* badreq = "400 Bad Request";
 const char* crlf = "\r\n";
 
@@ -160,11 +160,11 @@ void handle_command(std::string rawstring, int sock){
 
 
 	std::vector<std::string> lines;
-
-	printf("I got characters:");
-	for(int j=0;j<rawstring.length();j++){
-		printf(" %d",(int)rawstring[j]);
-	}
+//
+//	printf("I got characters:");
+//	for(int j=0;j<rawstring.length();j++){
+//		printf(" %d",(int)rawstring[j]);
+//	}
 	rawstring = trim_string(rawstring,false);
 	lines = split_string(rawstring,"\n");
 	unsigned int numlines = lines.size();
@@ -173,7 +173,7 @@ void handle_command(std::string rawstring, int sock){
 
 	char* time_s;
 	std::string lasthead = "NULL";
-	std::string resource, contents;
+	std::string resource, contents,post_data="";
 	// parse through each line
 	std::vector<std::string> ua, cook;
 	unsigned int numwords;
@@ -182,6 +182,7 @@ void handle_command(std::string rawstring, int sock){
 	bool _fget = false , _fpost = false;
 
 	int fd;
+	int post_req_len;
 
 	for(int i=0;i<numlines;i++){
 		//printf("%s\n",lines[i].data());
@@ -233,7 +234,33 @@ void handle_command(std::string rawstring, int sock){
 
 
 
+		else if(trim_string(words[0],true) == "cookie:" or trim_string(words[0], true) == "Cookie:" ){
+			cook.push_back(trim_string(words[1],true));
+			printf("GOT A COOKIE HERE IN MANUAL CHECK\n");
+		}
 
+		else if(trim_string(words[0],true) == "Content-Length:" or trim_string(words[0], true) == "content-length:" ){
+			post_req_len = std::stoi(trim_string(words[1],true).data());
+			printf(words[1].data());
+			printf("GOT A POST WITH %d chars\n",post_req_len);
+			
+			if(_fpost){
+				printf("READING ONE MORE LINE!\n");
+				char buf;
+				int count= 0;
+				bool eol = false;
+				printf("WAITING FOR %d chars\n",post_req_len);
+				while(count < post_req_len){
+					recv(sock,&buf,1,0);
+						if(buf != 0){
+						post_data = post_data += buf;
+						printf("%d, %d\n",count,(int)buf);
+						count++;
+						}
+				}
+				printf("READ %s\n",post_data.data());
+			}
+		}
 		else if (words.size() > 0){//not the first line, still have stuff
 
 			//printf("ARE WE FAULTING IN HERE??\n");
@@ -269,7 +296,8 @@ void handle_command(std::string rawstring, int sock){
 				if(currhead == "user-agent:" and words[j].length() > 0){
 					ua.push_back(words[j]);
 				}
-				else if(currhead == "cookie:"){
+				else if(currhead == "cookie: "){
+					printf("GOT A COOKIE!\n");
 					cook.push_back(words[j]);
 				}
 			}
@@ -319,17 +347,38 @@ void handle_command(std::string rawstring, int sock){
 							break;
 						case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
 							contents = "no permission";
-							write(sock,http_v,strlen(http_v));
-							write(sock,"404 Not found or no permission",30);
+							write(sock,notfound,strlen(notfound));
+							write(sock,crlf,2);
+							write(sock,crlf,2);
+							write(sock,"NO",2);
 							write(sock,crlf,2);
 							return;
 					}
 		
 			
-		}else if(resource.compare("/login") == 0 or resource.compare("/register") == 0){
-			getrq ->set_row("/login");
+		}else if(resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0){
+			getrq ->set_row(resource);
 			getrq -> set_column("common");
 			printf("RESOURCE IS HERE\n");
+			
+			if(kvs.request(&resp, req) != 0){
+						perror("REQUEST FAIL!\n");
+					}
+					printf("REQUESTED!\n");
+					std::cout << resp.DebugString() << std::endl;
+					
+					switch (resp.service_response_case()) {
+						case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+							contents= resp.get().value();
+							break;
+						case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+							contents = "no permission";
+							write(sock,notfound,strlen(notfound));
+							write(sock,crlf,2);
+													write(sock,crlf,2);
+													write(sock,"NO",2);
+							write(sock,crlf,2);
+					}
 			
 		}
 		
@@ -361,8 +410,10 @@ void handle_command(std::string rawstring, int sock){
 					break;
 				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
 					contents = "no permission";
-					write(sock,http_v,strlen(http_v));
-					write(sock,"404 Not found or no permission",30);
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+											write(sock,crlf,2);
+											write(sock,"NO",2);
 					write(sock,crlf,2);
 					return;
 			}
@@ -395,9 +446,11 @@ void handle_command(std::string rawstring, int sock){
 						break;
 					case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
 						contents = "no permission";
-						write(sock,http_v,strlen(http_v));
-						write(sock,"404 Not found or no permission",30);
+						write(sock,notfound,strlen(notfound));
 						write(sock,crlf,2);
+												write(sock,crlf,2);
+												write(sock,"NO",2);
+						//write(sock,crlf,2);
 						return;
 				}
 			}
@@ -410,6 +463,9 @@ void handle_command(std::string rawstring, int sock){
 		if(contents.compare(std::string(notfound)) == 0){
 			write(sock,notfound,strlen(notfound));
 			write(sock,crlf,2);
+			write(sock,crlf,2);
+									write(sock,crlf,2);
+									write(sock,"NO",2);
 			return;
 		}
 		else{
@@ -428,10 +484,10 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,ccook.data(),strlen(ccook.data()));
 			write(sock,crlf,2);
 
-			//content type
-			write(sock,"content-type: ",14);
-			write(sock,"text/html",9);
-			write(sock,crlf,2);
+//			//content type
+//			write(sock,"content-type: ",14);
+//			write(sock,"text/html",9);
+//			write(sock,crlf,2);
 
 			// content length
 			int cl = (int)contents.length();
@@ -459,19 +515,19 @@ void handle_command(std::string rawstring, int sock){
 
 	}
 	else if(_fpost){
-		std::string post_data = "";
 		// read one more line
-		char buf;
-		bool eol;
-		while(!eol){
-			if(recv(sock,&buf,1,0)){
-				post_data = post_data + std::to_string(buf);
-			}
-			if(buf == '\n'){eol = true;}
-		}
+
 
 		// do something based on the resource:
 
+		//if register
+		if(resource == "/register"){
+			printf("parsing credentials\n");
+			
+			
+			
+		}
+		
 		// if login
 
 		// get check un/pw combo
@@ -486,7 +542,9 @@ void handle_command(std::string rawstring, int sock){
 		temp = split_string(cred[1],"=");
 
 		std::string pw = temp[1];
-
+		
+		printf("WE HAVE UN %s and PW %s\n",un.data(),pw.data());
+		
 		// check if un+pw combo exists in kvs
 
 		getrq -> set_column(un);
@@ -496,26 +554,125 @@ void handle_command(std::string rawstring, int sock){
 			perror("REQUEST FAIL! \n");
 		}
 		std::cout << resp.DebugString() << std::endl;
-		bool login = false;
-		switch (resp.service_response_case()) {
-			case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
-				login = true;
-
-				// put cookie in table as ("clist",cookie) <- un
-
-				putrq -> set_row("clist");
-				putrq -> set_column(ccook);
-				putrq -> set_value(un);
-
-				if(kvs.request(&resp2,req2) !=0){
-					perror("REQUEST FAIL!\n");
-				}
-
-				break;
-			case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
-				login = false;
-				break;
+		bool login = false, reg = false;	
+		if(resource == "/login"){
+			login = false;
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					login = true;
+	
+					// put cookie in table as ("clist",cookie) <- un
+	
+					putrq -> set_row("clist");
+					putrq -> set_column(ccook);
+					putrq -> set_value(un);
+					printf("LOGGED IN!\n");
+	
+					if(kvs.request(&resp2,req2) !=0){
+						perror("REQUEST FAIL!\n");
+					}
+	
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					login = false;
+					break;
+			}
 		}
+		else if(resource == "/register"){
+			reg = false;
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					reg = true;
+					break;
+				
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					reg = false;
+					// not registered, put in table
+					putrq  -> set_column(un);
+					putrq -> set_row(pw);
+					putrq -> set_value("user registered");
+					printf("REGISTERED!\n");
+					break;
+			}
+		}
+		
+		if(resource == "/register" or resource == "/login"){
+			
+			
+//			//write(sock,http_v,strlen(http_v));
+//			write(sock, "HTTP/1.1 303 See Other",22);
+//			write(sock,crlf,2);
+//			write(sock,"Location: ",10);
+//			write(sock,"127.0.0.1:",10);
+//			write(sock,PORTNO,strlen(PORTNO));
+//			write(sock,"/index",6);
+//			write(sock,crlf,2);
+//			write(sock,crlf,2);
+//			
+//			/////
+			//return;
+			
+			write(sock,http_v,strlen(http_v));
+			write(sock,crlf,2);
+			
+			// write ok...
+			write(sock,ok,strlen(ok));
+			write(sock,crlf,2);
+
+
+			//time
+			time(&cur_time);
+			time_s = ctime(&cur_time);
+			write(sock,"Date: ",6);
+			write(sock,time_s,strlen(time_s));
+			
+			//cookie
+			write(sock,"set-cookie: ",12);
+			write(sock,ccook.data(),strlen(ccook.data()));
+			write(sock,crlf,2);
+
+			//content type
+			write(sock,"content-type: ",14);
+			write(sock,"text/html",9);
+			write(sock,crlf,2);
+			
+			// fetch the appropriate page:
+			
+			//if newly registered or properly logged in, splash
+			if(resource == "/login" and login){contents = "<textarea>LOGIN SPLASH</textarea>";}
+			if(resource == "/login" and !login){contents = "<textarea>REG SPLASH</textarea>";}
+			if(resource == "/register" and !reg){contents = "<textarea>WELCOME SPLASH</textarea>";}
+			if(resource == "/register" and reg){contents = "<textarea>ALREADY REGISTERD SPLASH</textarea>";}
+			
+			
+			// else if already registered, login splash
+			
+			// else if login but no exist, register splash
+			
+			
+			
+			// content length
+			int cl = (int)contents.length();
+			printf("GOT LENGTH! %d\n",cl);
+			
+			
+			write(sock,"content-length: ",16);
+			write(sock,std::to_string(cl).data(),strlen(std::to_string(cl).data()));
+			write(sock,crlf,2);
+
+			// blank line
+			write(sock,crlf,2);
+
+			// content
+			write(sock,contents.data(),strlen(contents.data()));
+			write(sock,crlf,2);
+			return;
+
+		}
+			
+			
+			
+		
 
 
 
@@ -604,10 +761,10 @@ void *handle_connection(void *s){
 
   std::string s_msg;
 
-  char msg[100000], e_msg[100000], c;
+  char msg, e_msg[100000], c;
   int rec,bread,fd,counter=0;
 
-  memset((void*)msg,0,100000);
+  msg = 0;
   memset((void*)e_msg,0,100000);
 
 	while(true){
@@ -616,12 +773,12 @@ void *handle_connection(void *s){
 
 
 	// read from socket
-	  rec = recv(sock,msg,100000,0);
+	  rec = recv(sock,&msg,1,0);
 	  if(rec>0){
 		  // char by char
 		  for(int i=0;i<rec;i++){
 
-			  c = msg[i];
+			  c = msg;
 			  if((int)c == 0){//printf("NULL CHAR!\n");
 				  
 			  }
@@ -656,7 +813,7 @@ void *handle_connection(void *s){
 					  counter = 0;
 
 					  handle_command(s_msg,sock);
-					  memset((void*)msg,0,100000);
+					  msg =0;
 					  memset((void*)e_msg,0,100000);
 				  }
 			  }
@@ -698,7 +855,7 @@ int main(int argc, char* argv[]){
 
   // default port is 10000
   // default root env is current directory
-  char PORTNO[6];
+  
   strcpy(PORTNO,"10000");
   rootdir = getenv("PWD");
 
