@@ -47,6 +47,8 @@ int main(int argc, char *argv[]) {
   } else if (mode == "delete") {
     auto deleteReq = request.mutable_d();
     deleteReq->set_message_id(id);
+  } else if (mode == "createuser") {
+    auto createReq = request.mutable_c();
   } 
 
   MailSession session(serverAddr, port);

@@ -78,6 +78,41 @@ list<string> get_lines(string s) {
 	return l;
 }
 
+bool user_exists(string to) {
+	int index = 0;
+
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
+			GetRequest* g = kv_r.mutable_get();
+			g->set_row(to);
+			g->set_column("mbox");
+		
+			session.connect();
+			session.request(&response, kv_r); 
+			session.disconnect();
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					return true;
+				case ResponseCode::NO_SUCH_KEY:
+					return false;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;
+			}
+		}
+	}
+	return false;
+}
+
+
 map<int, Email> parse_messages(string mbox) {
 	map<int, Email> messages;
 	list<string> lines = get_lines(mbox);
@@ -297,6 +332,72 @@ string get_email(string user, int id) {
 	return "";
 }
 
+WebmailResponseCode create_user(string user) {
+	if (user_exists(user)) return WebmailResponseCode::ALREADY_EXISTS;
+	int index = 0;
+
+	WebmailResponseCode toReturn = WebmailResponseCode::FAILURE;
+
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
+			PutRequest* p = kv_r.mutable_put();
+			p->set_row(user);
+			p->set_column("mbox");
+		
+			session.connect();
+			session.request(&response, kv_r); 
+			session.disconnect();
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					toReturn = WebmailResponseCode::SUCCESS;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;				
+			}
+		}
+	}
+	if (toReturn == WebmailResponseCode::FAILURE) return toReturn;
+	
+	toReturn = WebmailResponseCode::FAILURE;
+	index = 0;
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
+			PutRequest* p = kv_r.mutable_put();
+			p->set_row(user);
+			p->set_column("next_id");
+			p->set_value("1");
+		
+			session.connect();
+			session.request(&response, kv_r); 
+			session.disconnect();
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					toReturn = WebmailResponseCode::SUCCESS;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;				
+			}
+		}
+	}
+	return toReturn;
+}
+
 // This is the MAIN function for the thread.
 void* pop3(void* arg) {
 	struct echo_data* data = (struct echo_data*) arg;
@@ -372,6 +473,17 @@ void* pop3(void* arg) {
 					os->Flush();
 					break;
 				}
+	
+				case WebmailServiceRequest::ServiceRequestCase::kC:
+					{
+						WebmailResponseCode c = create_user(message.user());
+						WebmailServiceResponse resp;
+						GenericResponse* g = resp.mutable_generic();
+						resp.set_response_code(c);
+						ProtoUtil::writeDelimitedTo(resp, os);
+						os->Flush();
+						break;
+					}
 		}
 	}
 	return NULL;

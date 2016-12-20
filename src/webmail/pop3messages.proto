@@ -15,6 +15,9 @@ message EmailRequest {
   int32 message_id = 1;
 };
 
+message CreateUserRequest {
+}
+
 message WebmailServiceRequest {
   int32 request_id = 1;
   string user = 2;
@@ -23,6 +26,7 @@ message WebmailServiceRequest {
     MessagesRequest m = 3;
     DeleteRequest d = 4;
     EmailRequest e = 5;
+    CreateUserRequest c = 6;
   };
 };
 
@@ -37,6 +41,7 @@ enum WebmailResponseCode {
   CONCURRENT_CHANGE = 2;
   INVALID_INDEX = 3;
   FAILURE = 4;
+  ALREADY_EXISTS = 5;
 };
 
 message EmailResponse {
