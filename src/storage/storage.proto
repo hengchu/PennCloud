@@ -1,6 +1,9 @@
 syntax = "proto3";
 package storage;
 
+message CreateUserRequest {
+}
+
 message CreateRequest {
   string filename = 1;
   string contents = 2;
@@ -44,6 +47,7 @@ message StorageServiceRequest {
     GetFileRequest getfile = 7;
     DeleteRequest delete = 8;
     RenameRequest rename = 9;
+    CreateUserRequest createuser = 10;
   };
 };
 
@@ -54,6 +58,7 @@ enum StorageResponseCode {
   MISSING_DIRECTORY = 3;
   FAILURE = 4;
   CONCURRENT_MODIFY = 5;
+  ALREADY_EXISTS = 6;
 };
 
 enum DirectoryType {

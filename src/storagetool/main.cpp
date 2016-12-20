@@ -72,6 +72,9 @@ int main(int argc, char *argv[]) {
     auto moveReq = request.mutable_rename();
     moveReq->set_original(filename);
     moveReq->set_new_(new_name);
+  } else if (mode == "createuser") {
+    // Nothing to set here
+    auto createReq = request.mutable_createuser();
   }
 
   StorageSession session(serverAddr, port);

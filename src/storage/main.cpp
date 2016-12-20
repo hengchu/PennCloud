@@ -694,6 +694,72 @@ StorageResponseCode rename_file(string user, string path, string to) {
 	return append_entry(user, base, inode, DirectoryType::FILE, to);
 }
 
+StorageResponseCode create_user(string user) {
+	if (user_exists(user)) return StorageResponseCode::ALREADY_EXISTS;
+	int index = 0;
+
+	StorageResponseCode toReturn = StorageResponseCode::FAILURE;
+
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
+			PutRequest* p = kv_r.mutable_put();
+			p->set_row(user);
+			p->set_column("inode0");
+		
+			session.connect();
+			session.request(&response, kv_r); 
+			session.disconnect();
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					toReturn = StorageResponseCode::SUCCESS;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;				
+			}
+		}
+	}
+	if (toReturn == StorageResponseCode::FAILURE) return toReturn;
+	
+	toReturn = StorageResponseCode::FAILURE;
+	index = 0;
+	while (index < config.servers_size()) {
+		KVSession session(config.servers(index).client_addr().ip_address(),
+											config.servers(index).client_addr().port());
+		KVServiceResponse response;
+
+		{
+			KVServiceRequest kv_r;
+			kv_r.set_request_id(0);
+			PutRequest* p = kv_r.mutable_put();
+			p->set_row(user);
+			p->set_column("next_inode");
+			p->set_value("1");
+		
+			session.connect();
+			session.request(&response, kv_r); 
+			session.disconnect();
+
+			switch (response.response_code()) {
+				case ResponseCode::SUCCESS:
+					toReturn = StorageResponseCode::SUCCESS;
+				case ResponseCode::FAILURE:
+				case ResponseCode::SERVICE_FAIL:
+					index++;
+					continue;				
+			}
+		}
+	}
+	return toReturn;
+}
+
 // This is the MAIN function for the thread.
 void* storage_main(void* arg) {
 	struct echo_data* data = (struct echo_data*) arg;
@@ -799,6 +865,16 @@ void* storage_main(void* arg) {
 							message.rename().original(),
 							message.rename().new_());
 					GenericResponse* g = wsr.mutable_generic();
+					wsr.set_user(message.user());
+					wsr.set_request_id(message.request_id());
+					wsr.set_response_code(c);
+					break;
+				}
+
+			case StorageServiceRequest::ServiceRequestCase::kCreateuser:
+				{
+					StorageResponseCode c = create_user(message.user());
+					GenericResponse*g = wsr.mutable_generic();
 					wsr.set_user(message.user());
 					wsr.set_request_id(message.request_id());
 					wsr.set_response_code(c);
