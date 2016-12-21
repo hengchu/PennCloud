@@ -32,7 +32,9 @@
 #include <string>
 #include <kvapi.h>
 #include <ctime>
-
+#include <cstring>
+#include <storageapi.h>
+#include <mailapi.h>
 
 
 
@@ -53,6 +55,9 @@ int sockfd;
 int clients[1024];
 
 
+int cookiegen = rand();
+
+
 
 std::vector<std::string> valid_headers = {"cookie:","user-agent:"};
 const char* ok = "200 OK";
@@ -61,6 +66,24 @@ const char* http_v = "HTTP/1.1 ";
 const char* badreq = "400 Bad Request";
 const char* crlf = "\r\n";
 
+std::string urlDecode(const std::string &SRC) {
+    std::string ret;
+    char ch;
+    int i, ii;
+    for (i=0; i<SRC.length(); i++) {
+        if (int(SRC[i])==37) {
+            sscanf(SRC.substr(i+1,2).c_str(), "%x", &ii);
+            ch=static_cast<char>(ii);
+            ret+=ch;
+            i=i+2;
+        } else if (SRC[i] == '+') {
+        	ret+=' ';
+        } else {
+            ret+=SRC[i];
+        }
+    }
+    return (ret);
+}
 
 // an auxiliary function to trim whitespace at the start and end of a string
 std::string trim_string(std::string line, bool spaces){
@@ -93,6 +116,55 @@ std::string trim_string(std::string line, bool spaces){
 	//printf("DID BACK\n");
 	//printf("FINISHED TRIM\n");
 	return line;
+}
+
+void sendMail(const std::string& toAddr,
+		      const std::string& fromAddr,
+			  const std::string& mailBody)
+{
+	int sock = socket(AF_INET, SOCK_STREAM, 0);
+	
+	if (sock < 0) {
+		perror("Failed to create socket for connection to SMTP server.\n");
+		exit(1);
+	}
+
+	sockaddr_in smtpAddr;
+	
+	std::memset(&smtpAddr, 0, sizeof(smtpAddr));
+
+	smtpAddr.sin_family = AF_INET;
+	smtpAddr.sin_port   = htons(3506);
+
+	int rc = inet_pton(AF_INET,
+			     	   "127.0.0.1",
+					   &(smtpAddr.sin_addr));
+	
+	if (rc != 1) {
+		std::cerr << "Failed to parse the IP for smtp server."
+				  << std::endl;
+		exit(1);
+	}
+	
+	connect(sock, reinterpret_cast<sockaddr *>(&smtpAddr), sizeof(smtpAddr));
+	
+	std::string helo = "HELO webserver\r\n";
+	write(sock, helo.data(), helo.length());
+	
+	std::stringstream ss;
+	ss << "MAIL FROM " << fromAddr << "\r\n";		
+	write(sock, ss.str().data(), ss.str().length());
+	
+	ss.str("");
+	ss << "RCPT TO " << toAddr << "\r\n";
+	write(sock, ss.str().data(), ss.str().length());
+	
+	write(sock, "DATA\r\n", strlen("DATA\r\n"));
+	
+	ss.str("");
+	ss << mailBody << "\r\n.\r\n";
+	write(sock, ss.str().data(), ss.str().length());
+
 }
 
 //splits a string at the given delimiter
@@ -142,6 +214,31 @@ void handle_command(std::string rawstring, int sock){
 	kvservice::GetRequest *getrq = req.mutable_get();
 
 	kvservice::PutRequest *putrq = req2.mutable_put();
+	
+	
+	
+	
+	StorageSession stor ("127.0.0.1",3504);
+	if(stor.connect() != 0){
+		perror("STOR FAIL\n");
+		exit(1);
+	}
+	
+	MailSession mail ("127.0.0.1",3505);
+	if(mail.connect() != 0){
+		perror("MAIL FAIL!\n");
+		exit(1);
+	}
+	
+	
+	
+//	storage::StorageServiceRequest sreq;
+//	storage::StorageServiceRequest sreq2;
+//	
+//	storage::StorageServiceResponse sresp,sresp2;
+//	
+//	storage::CreateRequest *creatrq = sreq.mutable_create();
+//	storage::GetFileRequest *getfrq = sreq2.mutable_getfile();
 
 
 	std::vector<std::string> lines;
@@ -211,6 +308,9 @@ void handle_command(std::string rawstring, int sock){
 				// load up the resource
 				resource = trim_string(words[1],true);
 				printf("RESOURCE NAME: %s\n",resource.data());
+				if(resource.length() > 9){
+					printf("RESOURCE SUBSTR 9: %s\n",resource.substr(0,9).data());
+				}
 			}
 			else{return;
 
@@ -220,7 +320,15 @@ void handle_command(std::string rawstring, int sock){
 
 
 		else if(trim_string(words[0],true) == "cookie:" or trim_string(words[0], true) == "Cookie:" ){
-			cook.push_back(trim_string(words[1],true));
+			// std::cout << trim_string(words[1], true) << std::endl;
+			
+			std::string rawCookie = trim_string(words[1], true);
+			int pos = rawCookie.find(";");
+			printf("POS IS %d\n",pos);
+			if (pos >= 0) {
+				rawCookie.assign(rawCookie.begin(), rawCookie.begin() + pos);
+			}
+			cook.push_back(rawCookie);
 			printf("GOT A COOKIE HERE IN MANUAL CHECK\n");
 		}
 
@@ -233,17 +341,18 @@ void handle_command(std::string rawstring, int sock){
 				printf("READING ONE MORE LINE!\n");
 				char buf;
 				int count= 0;
+				
 				bool eol = false;
 				printf("WAITING FOR %d chars\n",post_req_len);
 				while(count < post_req_len){
 					recv(sock,&buf,1,0);
-						if(buf != 0){
-						post_data = post_data += buf;
-						printf("%d, %d\n",count,(int)buf);
+						//if(buf != 0){
+						post_data = post_data + buf;
+						//printf("%d, %d\n",count,(int)buf);
 						count++;
-						}
+						//}
 				}
-				printf("READ %s\n",post_data.data());
+				printf("READ \n%s\n",post_data.data());
 			}
 		}
 
@@ -257,8 +366,8 @@ void handle_command(std::string rawstring, int sock){
 
 	}
 	else{ // generate a cookie
-		cookie_gen++;
-		ccook = "testcookie";
+		cookiegen++;
+		ccook = std::to_string(cookiegen);
 
 		// add cookie to map
 	}
@@ -275,11 +384,12 @@ void handle_command(std::string rawstring, int sock){
 			
 					
 			
-		}else if(resource.compare("/upload") == 0 or resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0){
+		}else if(resource.compare("/upload") == 0 or resource.compare("/login") == 0 or resource.compare("/register") == 0 or resource.compare("/favicon.ico") == 0 or resource.compare("/mail/send") == 0){
 			getrq ->set_row(resource);
 			getrq -> set_column("common");
 			printf("RESOURCE IS HERE\n");
-			common = true
+
+			common = true;
 		}
 		
 		
@@ -292,7 +402,7 @@ void handle_command(std::string rawstring, int sock){
 			
 			switch (resp.service_response_case()) {
 				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
-					contents= resp.get().value();
+					contents = resp.get().value();
 					break;
 				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
 					contents = "no permission";
@@ -309,8 +419,8 @@ void handle_command(std::string rawstring, int sock){
 
 
 		
-		else{ // not looking for a common resource: lookup pair is (cookie, resource)
-
+		else if (resource.substr(0,5) != "/mail"){ // not looking for a common resource: lookup pair is (cookie, resource)
+			printf("NOT MAIL\n");
 			// lookup username from ("clist",cookie)
 			getrq -> set_row("clist");
 			getrq -> set_column(ccook);
@@ -344,42 +454,115 @@ void handle_command(std::string rawstring, int sock){
 
 
 			// if username not ""
-
-			// if resource is /mail/*
-			if(resource.substr(9) == "/mail/msg"){
-				// send request to pop
+			
+			storage::StorageServiceRequest sreq;
+			
+			storage::StorageServiceResponse sresp;
+			
+			sreq.set_user(un); // fix this later
+			
+			
+			
+			storage::GetFileRequest *getfrq = sreq.mutable_getfile();
+			
+			getfrq -> set_filename(resource);
+			
+			
+			if(stor.request(&sresp, sreq) != 0){
+				perror("REQUEST FAIL!\n");
 			}
-			else{
-				// get from kvs
-				// lookup username from ("clist",cookie)
-				getrq -> set_column(un);
-				getrq -> set_row(resource);
-
-				if(kvs.request(&resp,req) != 0){
-					perror("REQUEST FAIL! \n");
-				}
-				std::cout << resp.DebugString() << std::endl;
-
-
-
-
-				// check response codes:
-				switch (resp.service_response_case()) {
-					case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
-						contents= resp.get().value();
-						break;
-					case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
-						contents = "no permission";
-						write(sock,notfound,strlen(notfound));
-						write(sock,crlf,2);
-						write(sock, "Content-Length: 2",17);
-						write(sock,crlf,2);
-						write(sock,crlf,2);
-						write(sock,"NO",2);
-						write(sock,crlf,2);
-						return;
-				}
+			else{printf("FILE GOT!\n");}
+			if(sresp.response_code() != storage::StorageResponseCode::SUCCESS){
+				printf("FILE NOT FOUND!\n");
+				return;
 			}
+			switch (sresp.service_response_case()) {
+				case storage::StorageServiceResponse::ServiceResponseCase::kGetfile:{
+					printf("FILE: %s\n",sresp.getfile().contents().data());
+					
+					contents = sresp.getfile().contents();
+					
+					
+				} break;
+				default:
+					printf("WRONG RESPONSE TYPE!\n");
+					return;
+			}
+			
+		}
+		
+		// if resource is /mail/*
+		else if(resource.substr(0,9).compare("/mail/msg") == 0){
+			printf("LOOKING FOR MAIL\n");
+			std::cout << resource.substr(10) << std::endl;
+			
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
+
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+
+
+
+			// check response codes:
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
+					write(sock,crlf,2);
+					return;
+			}
+			
+			
+			
+			
+			
+			
+			int mailindex = atoi(resource.substr(10).data());
+			
+			//call mailserver
+			
+			webmail::WebmailServiceRequest wreq;
+			webmail::WebmailServiceResponse wresp;
+			
+			
+			wreq.set_user(un);
+			
+			webmail::EmailRequest *ereq = wreq.mutable_e();
+			ereq->set_message_id(mailindex);
+			
+			if (0 != mail.request(&wresp, wreq)) {
+				perror("Failed to send request.\n");
+			}
+			
+			std::cout << "RESPONSE = " << wresp.DebugString() << std::endl;
+			
+			if (wresp.response_code() != webmail::WebmailResponseCode::SUCCESS) {
+				perror("Failed to get mail!");
+			}
+			
+			switch(wresp.service_response_case()) {
+			case webmail::WebmailServiceResponse::kGet: {
+				contents = wresp.get().message();
+				std::cout << "Mail content: " << contents << std::endl;
+			} break;
+			default:
+				perror("Wrong response type.");
+			}
+			
 		}
 
 
@@ -408,7 +591,7 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,time_s,strlen(time_s));
 			
 			//cookie
-			write(sock,"set-cookie: ",12);
+			write(sock,"Set-Cookie: ",12);
 			write(sock,ccook.data(),strlen(ccook.data()));
 			write(sock,crlf,2);
 
@@ -509,18 +692,50 @@ void handle_command(std::string rawstring, int sock){
 		else if(resource == "/register"){
 			reg = false;
 			switch (resp.service_response_case()) {
-				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet: {
 					reg = true;
 					break;
+				}
 				
-				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure: {
 					reg = false;
 					// not registered, put in table
 					putrq  -> set_column(un);
 					putrq -> set_row(pw);
 					putrq -> set_value("user registered");
+					
+					if(kvs.request(&resp2,req2) != 0){
+						perror("PUT REQ FAIL\n");
+					}
+					
+					webmail::WebmailServiceRequest wreq;
+					webmail::WebmailServiceResponse wres;
+					webmail::CreateUserRequest *cr = wreq.mutable_c();
+					wreq.set_user(un);
+					
+					if (mail.request(&wres, wreq) != 0) {
+						perror("MAIL FAIL\n");
+					} else {
+						if(webmail::WebmailResponseCode::SUCCESS != wres.response_code()) {
+							perror("MAIL FAIL\n");
+						}
+					}
+					
+					storage::StorageServiceRequest sreq;
+					storage::StorageServiceResponse sres;
+					storage::CreateUserRequest *scr = sreq.mutable_createuser();
+					sreq.set_user(un);
+										
+					if (stor.request(&sres, sreq) != 0) {
+						perror("STORAGE FAIL\n");
+					} else {
+						if(storage::StorageResponseCode::SUCCESS != sres.response_code()) {
+							perror("STORAGE FAIL\n");
+						}
+					}
 					printf("REGISTERED!\n");
 					break;
+				}
 			}
 		}
 		
@@ -555,7 +770,7 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,time_s,strlen(time_s));
 			
 			//cookie
-			write(sock,"set-cookie: ",12);
+			write(sock,"Set-Cookie: ",12);
 			write(sock,ccook.data(),strlen(ccook.data()));
 			write(sock,crlf,2);
 
@@ -606,7 +821,163 @@ void handle_command(std::string rawstring, int sock){
 		
 		
 		
-		}	
+		}
+		else if (resource == "/sendmail"){
+			
+			
+			
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
+
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+
+
+
+			// check response codes:
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
+					write(sock,crlf,2);
+					return;
+			}
+			
+			
+			
+			
+			
+			
+			std::cout << post_data << std::endl;
+			
+			std::vector<std::string> cont = split_string(post_data,"&");
+
+			std::vector<std::string> temp = split_string(cont[0],"=");
+
+
+			std::string recpt = temp[1];
+
+			temp = split_string(cont[1],"=");
+
+			std::string msg = temp[1];
+			
+			std::string fromaddr = un + "@localhost";
+			
+			std::cout << "Addr: " << urlDecode(recpt) << std::endl;
+			std::cout << "MSG: " << urlDecode(msg) << std::endl;
+			
+			sendMail(urlDecode(recpt),
+					 fromaddr,
+				     urlDecode(msg));
+			
+			std::cout << "Sent mail" << std::endl;
+			
+			return;
+			
+		}
+		else {//resource isnt login
+			
+			
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
+
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+
+
+
+			// check response codes:
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
+					write(sock,crlf,2);
+					return;
+			}
+
+			
+			
+			
+			
+			
+			
+			std::string postfile = "";
+			std::string postfn = "";
+			
+			
+			auto pos = post_data.find("filename=\"");
+			postfn.assign(post_data.begin() + pos + strlen("filename=\"")	, post_data.end());
+			pos = postfn.find("\"\r\n");
+			postfn.assign(postfn.begin(),postfn.begin()+pos);
+			
+			std::vector<std::string> postlines = split_string(post_data,"\n");
+			
+			pos = post_data.find("\r\n\r\n");
+			postfile.assign(post_data.begin()+pos,post_data.end());
+			
+			pos = postfile.find("\r\n-------");
+			postfile.assign(postfile.begin()+4,postfile.begin()+pos);
+			
+			
+			
+			
+			storage::StorageServiceRequest sreq;
+			
+			storage::StorageServiceResponse sresp;
+			
+			sreq.set_user(un); // fix this later
+			
+			
+			
+			storage::CreateRequest *creatrq = sreq.mutable_create();
+			creatrq -> set_filename("/"+postfn);
+			creatrq -> set_contents(postfile);
+			
+			
+			
+			printf("POSTFN IS: %s\n",postfn.data());
+			printf("POSTFILE IS: %s\n",postfile.data());
+			
+			
+			
+			if(stor.request(&sresp, sreq) != 0){
+				perror("REQUEST FAIL!\n");
+			}
+			else{printf("FILE PUT!\n");}
+			
+			
+			
+			std::cout << sresp.DebugString() << std::endl;
+			return;
+		}
+						
+		
 
 	}
 

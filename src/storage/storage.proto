@@ -6,7 +6,7 @@ message CreateUserRequest {
 
 message CreateRequest {
   string filename = 1;
-  string contents = 2;
+  bytes contents = 2;
 }
 
 message CreateDirectoryRequest {
@@ -15,7 +15,7 @@ message CreateDirectoryRequest {
 
 message UpdateRequest {
   string filename = 1;
-  string contents = 2;
+  bytes contents = 2;
 }
 
 message GetDirectoryRequest {
@@ -79,7 +79,7 @@ message GetDirectoryResponse {
 };
 
 message GetFileResponse {
-  string contents = 1;
+  bytes contents = 1;
 };
 
 message FailureResponse {
