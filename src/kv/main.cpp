@@ -18,20 +18,21 @@ struct RunParams {
 
 int main(int argc, char *argv[])
 {
-  LogUtil::enableLogging();
-
   RunParams params;
   params.d_serverId = -1;
   params.d_configFile = 0;
   
   int c;
-  while ((c = getopt(argc, argv, "c:s:")) != -1) {
+  while ((c = getopt(argc, argv, "c:s:v")) != -1) {
     switch (c) {
     case 'c': {
       params.d_configFile = optarg;
     } break;
     case 's': {
       params.d_serverId = atoi(optarg);
+    } break;
+    case 'v': {
+      LogUtil::enableLogging();
     } break;
     default:
       break;

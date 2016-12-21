@@ -118,6 +118,15 @@ std::string trim_string(std::string line, bool spaces){
 	return line;
 }
 
+void do_write(int sock, const std::string& data)
+{
+	int sent = 0;
+	
+	do {
+		sent += write(sock, data.data() + sent, data.length() - sent);
+	} while (sent != data.length());
+}
+
 void sendMail(const std::string& toAddr,
 		      const std::string& fromAddr,
 			  const std::string& mailBody)
@@ -417,7 +426,123 @@ void handle_command(std::string rawstring, int sock){
 			}
 		}
 
+		else if(resource.compare("/mail") == 0){
+			
+			std::cout << "In /mail" << std::endl;
+			
+			// lookup list of my emails
+			
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
 
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
+					write(sock,crlf,2);
+					return;
+			}
+
+			webmail::WebmailServiceResponse resp;
+			webmail::WebmailServiceRequest  req;
+			
+			req.set_user(un);
+			req.mutable_m();
+			
+			if (mail.request(&resp, req) != 0) {
+				perror("Failed to contact Mail Server\n");
+			}
+			
+			switch (resp.service_response_case()) {
+			case webmail::WebmailServiceResponse::ServiceResponseCase::kM: {
+				auto it = resp.m().page().begin();
+				
+				std::stringstream ss;
+				for (; it != resp.m().page().end(); ++it) {
+					ss << "id: " << it->id() << ", from: " << it->from() << "\n";
+				}
+				
+				contents = ss.str();
+			} break;
+			default:
+				perror("Wrong response type!\n");
+			}
+			
+		}
+		
+		else if (resource.compare("/dir") == 0) {
+			std::cout << "In /dir" << std::endl;
+			
+			// lookup list of my emails
+			
+			getrq -> set_row("clist");
+			getrq -> set_column(ccook);
+
+			if(kvs.request(&resp,req) != 0){
+				perror("REQUEST FAIL! \n");
+			}
+			std::cout << resp.DebugString() << std::endl;
+
+			std::string un = "";
+			switch (resp.service_response_case()) {
+				case kvservice::KVServiceResponse::ServiceResponseCase::kGet:
+					un = resp.get().value();
+					printf("FOUND USERNAME.  IT IS %s\n",un.data());
+					break;
+				case kvservice::KVServiceResponse::ServiceResponseCase::kFailure:
+					contents = "no permission";
+					write(sock,notfound,strlen(notfound));
+					write(sock,crlf,2);
+					write(sock, "Content-Length: 2",17);
+					write(sock,crlf,2);
+					write(sock,crlf,2);
+					write(sock,"NOT LOGGED IN",13);
+					write(sock,crlf,2);
+					return;
+			}
+			
+			storage::StorageServiceRequest  req;
+			storage::StorageServiceResponse resp;
+			
+			req.set_user(un);
+			
+			auto getdirreq = req.mutable_getdir();
+			getdirreq->set_directory("/");
+			
+			if (stor.request(&resp, req) != 0) {
+				perror("failed to contact storage server");
+			}
+			
+			switch (resp.service_response_case()) {
+			case storage::StorageServiceResponse::kGetdir: {
+				auto it = resp.getdir().entries().begin();
+				
+				std::stringstream ss;
+				for (; it != resp.getdir().entries().end(); ++it) {
+					ss << "FileType: " << it->type() << ", FileName: " << it->name() << "\n";
+				}
+				
+				contents = ss.str();
+			} break;
+			default:
+				perror("Wrong response type.");
+			}
+		}
 		
 		else if (resource.substr(0,5) != "/mail"){ // not looking for a common resource: lookup pair is (cookie, resource)
 			printf("NOT MAIL\n");
@@ -605,7 +730,7 @@ void handle_command(std::string rawstring, int sock){
 			printf("GOT LENGTH! %d\n",cl);
 			
 			
-			write(sock,"content-length: ",16);
+			write(sock,"Content-Length: ",16);
 			write(sock,std::to_string(cl).data(),strlen(std::to_string(cl).data()));
 			write(sock,crlf,2);
 
@@ -613,7 +738,7 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,crlf,2);
 
 			// content
-			write(sock,contents.data(),strlen(contents.data()));
+			do_write(sock,contents); //.data(),strlen(contents.data()));
 			write(sock,crlf,2);
 
 		}
@@ -807,7 +932,7 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,crlf,2);
 
 			// content
-			write(sock,contents.data(),strlen(contents.data()));
+			do_write(sock,contents); //.data(),strlen(contents.data()));
 			write(sock,crlf,2);
 			return;
 
