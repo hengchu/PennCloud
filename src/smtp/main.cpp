@@ -321,7 +321,7 @@ void* smtp(void* arg) {
 	while(true) {
 		vector<char> buffer(BUFFER_SIZE);
 		int n = read(data->comm_fd, buffer.data(), BUFFER_SIZE);
-		if (n == 0) {
+		if (n < 0) {
 			cout << "Error reading from socket.";
 			close(data->comm_fd);
 			CLOSE_CONNECTION(data->comm_fd);
