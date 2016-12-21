@@ -46,7 +46,6 @@ char PORTNO[6];
 
 time_t cur_time;
 
-unsigned int cookie_gen = 111111;
 
 std::map<int, int> cookie_pairs;
 
@@ -316,6 +315,8 @@ void handle_command(std::string rawstring, int sock){
 
 				// load up the resource
 				resource = trim_string(words[1],true);
+				
+				//if(resource.back() == '/'){resource.pop_back();}
 				printf("RESOURCE NAME: %s\n",resource.data());
 				if(resource.length() > 9){
 					printf("RESOURCE SUBSTR 9: %s\n",resource.substr(0,9).data());
@@ -375,7 +376,8 @@ void handle_command(std::string rawstring, int sock){
 
 	}
 	else{ // generate a cookie
-		cookiegen++;
+		printf("GENERATING A COOKIE!\n");
+		cookiegen = rand();
 		ccook = std::to_string(cookiegen);
 
 		// add cookie to map
@@ -474,7 +476,7 @@ void handle_command(std::string rawstring, int sock){
 				
 				std::stringstream ss;
 				for (; it != resp.m().page().end(); ++it) {
-					ss << "id: " << it->id() << ", from: " << it->from() << "\n";
+					ss << "id: " << it->id() << ", from: " << it->from() << "<br>";
 				}
 				
 				contents = ss.str();
@@ -482,6 +484,9 @@ void handle_command(std::string rawstring, int sock){
 			default:
 				perror("Wrong response type!\n");
 			}
+			
+			contents = "<html><br><a href=\"mail/send\">New Email</a><br><a href=\"dir\">Go To Files</a><br><br><br></html>" + contents;
+
 			
 		}
 		
@@ -534,7 +539,7 @@ void handle_command(std::string rawstring, int sock){
 				
 				std::stringstream ss;
 				for (; it != resp.getdir().entries().end(); ++it) {
-					ss << "FileType: " << it->type() << ", FileName: " << it->name() << "\n";
+					ss << "FileType: " << it->type() << ", FileName: " << it->name() << "<br>";
 				}
 				
 				contents = ss.str();
@@ -542,6 +547,8 @@ void handle_command(std::string rawstring, int sock){
 			default:
 				perror("Wrong response type.");
 			}
+			
+			contents = "<html><br><a href=\"mail\">Go To Email</a><br><a href=\"upload\">Upload New File</a><br><br><br></html>" + contents;
 		}
 		
 		else if (resource.substr(0,5) != "/mail"){ // not looking for a common resource: lookup pair is (cookie, resource)
@@ -720,10 +727,6 @@ void handle_command(std::string rawstring, int sock){
 			write(sock,ccook.data(),strlen(ccook.data()));
 			write(sock,crlf,2);
 
-//			//content type
-//			write(sock,"content-type: ",14);
-//			write(sock,"text/html",9);
-//			write(sock,crlf,2);
 
 			// content length
 			int cl = (int)contents.length();
@@ -907,9 +910,9 @@ void handle_command(std::string rawstring, int sock){
 			// fetch the appropriate page:
 			
 			//if newly registered or properly logged in, splash
-			if(resource == "/login" and login){contents = "<textarea>LOGIN SPLASH</textarea>";}
+			if(resource == "/login" and login){contents = "<html><br><a href=\"mail\">Email</a><br><a href=\"dir\">Files</a></html>";}
 			if(resource == "/login" and !login){contents = "<textarea>REG SPLASH</textarea>";}
-			if(resource == "/register" and !reg){contents = "<textarea>WELCOME SPLASH</textarea>";}
+			if(resource == "/register" and !reg){contents = "<html><br><a href=\"login\">Please Log In</a></html>";}
 			if(resource == "/register" and reg){contents = "<textarea>ALREADY REGISTERD SPLASH</textarea>";}
 			
 			
@@ -938,10 +941,7 @@ void handle_command(std::string rawstring, int sock){
 
 		}
 		
-		else if(resource == "/upload"){
-			printf("GOT AN UPLOAD.  SORRY SERVER!\n");
-			return;
-		}
+		
 		
 		
 		
@@ -1010,7 +1010,69 @@ void handle_command(std::string rawstring, int sock){
 			
 			std::cout << "Sent mail" << std::endl;
 			
+			
+			
+			
+			
+			write(sock,http_v,strlen(http_v));
+			write(sock,crlf,2);
+			
+			// write ok...
+			write(sock,ok,strlen(ok));
+			write(sock,crlf,2);
+
+
+			//time
+			time(&cur_time);
+			time_s = ctime(&cur_time);
+			write(sock,"Date: ",6);
+			write(sock,time_s,strlen(time_s));
+			
+			//cookie
+			write(sock,"Set-Cookie: ",12);
+			write(sock,ccook.data(),strlen(ccook.data()));
+			write(sock,crlf,2);
+
+			//content type
+			write(sock,"content-type: ",14);
+			write(sock,"text/html",9);
+			write(sock,crlf,2);
+			
+			// fetch the appropriate page:
+			
+			contents = "<html><br><a href=\"mail\">My Mail</a></html>";
+
+			
+			
+			
+			
+			// content length
+			int cl = (int)contents.length();
+			printf("GOT LENGTH! %d\n",cl);
+			
+			
+			write(sock,"content-length: ",16);
+			write(sock,std::to_string(cl).data(),strlen(std::to_string(cl).data()));
+			write(sock,crlf,2);
+
+			// blank line
+			write(sock,crlf,2);
+
+			// content
+			do_write(sock,contents); //.data(),strlen(contents.data()));
+			write(sock,crlf,2);
 			return;
+
+			
+			
+			
+
+			
+			
+			
+			
+			
+			
 			
 		}
 		else {//resource isnt login
@@ -1099,6 +1161,55 @@ void handle_command(std::string rawstring, int sock){
 			
 			
 			std::cout << sresp.DebugString() << std::endl;
+			
+			
+			write(sock,http_v,strlen(http_v));
+			write(sock,crlf,2);
+			
+			// write ok...
+			write(sock,ok,strlen(ok));
+			write(sock,crlf,2);
+
+
+			//time
+			time(&cur_time);
+			time_s = ctime(&cur_time);
+			write(sock,"Date: ",6);
+			write(sock,time_s,strlen(time_s));
+			
+			//cookie
+			write(sock,"Set-Cookie: ",12);
+			write(sock,ccook.data(),strlen(ccook.data()));
+			write(sock,crlf,2);
+
+			//content type
+			write(sock,"content-type: ",14);
+			write(sock,"text/html",9);
+			write(sock,crlf,2);
+			
+			// fetch the appropriate page:
+			
+			contents = "<html><br><a href=\"dir\">My Files</a></html>";
+
+			
+			
+			
+			
+			// content length
+			int cl = (int)contents.length();
+			printf("GOT LENGTH! %d\n",cl);
+			
+			
+			write(sock,"content-length: ",16);
+			write(sock,std::to_string(cl).data(),strlen(std::to_string(cl).data()));
+			write(sock,crlf,2);
+
+			// blank line
+			write(sock,crlf,2);
+
+			// content
+			do_write(sock,contents); //.data(),strlen(contents.data()));
+			write(sock,crlf,2);
 			return;
 		}
 						
